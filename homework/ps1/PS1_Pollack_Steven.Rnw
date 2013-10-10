@@ -1,0 +1,354 @@
+\documentclass[10pt,titlepage]{article}
+
+\usepackage{mcgill,fancyhdr,palatino}
+
+%%%%% knitr code to make sure things stay inside listings box:
+\usepackage{listings}
+\usepackage{inconsolata}
+
+\lhead{PHC240D}
+\chead{Problem Set \#1}
+\rhead{Steven Pollack -- 24112977}
+\cfoot{\thepage}
+
+\title{PHC240D \\ Problem Set \#1}
+\author{Steven Pollack \\ 24112977}
+\date{}
+
+\renewcommand{\Q}{\mathcal{Q}}
+\renewcommand{\H}{\mathcal{H}}
+\renewcommand{\N}{\mathcal{N}}
+\newcommand{\K}{\mathcal{K}}
+\newcommand{\U}{\mathcal{U}}
+\newcommand{\I}{\mathbb{I}}
+\newcommand{\X}{\mathbf{X}}
+\newcommand{\Y}{\mathbf{Y}}
+\DeclareMathOperator{\sgn}{sgn}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator{\supp}{supp}
+\DeclareMathOperator{\col}{col}
+\DeclareMathOperator{\proj}{proj}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\logit}{logit}
+\DeclareMathOperator{\expit}{expit}
+\DeclareMathOperator{\argmin}{argmin}
+\DeclareMathOperator{\argmax}{argmax}
+
+\begin{document}
+\maketitle
+\pagestyle{empty}
+\newpage
+\pagestyle{fancy}
+
+<<globalParameters,echo=FALSE,cache=FALSE>>=
+set.seed(1234)
+opts_chunk$set(comment="#",tidy=F,warning=FALSE,message=FALSE,highlight=T,echo=T,cache=T)
+@
+
+<<stayInside,echo=FALSE>>=
+  options(width=60)
+  listing <- function(x, options) {
+     paste("\\begin{lstlisting}[basicstyle=\\ttfamily,breaklines=true]\n", x,"\\end{lstlisting}\n", sep = "")
+  }
+  
+  knit_hooks$set(source=listing, output=listing)
+@
+
+<<q1a,echo=FALSE>>=
+load("../../assignments/examiningDoxorubicinInDetail.RData")
+library(Biobase)
+
+# Question 1. Examine and prepare datasets. Examine the different objects in the R dataset examiningDoxorubicinInDetail.RData. Store the expression measures and the sample and gene annotation data related to doxorubicinNCI60Scaled and doxorubicin07Numbers in objects of class ExpressionSet (Bioconductor R package Biobase).
+
+### format NCI60Scaled data into ESet
+NCI60AssayData <- doxorubicinNCI60Scaled
+
+### reshape sensitivty data to a form
+### that can be used as phenoData in ESet
+resistanceStatus <- cellLinesUsed$doxorubicin$listPotti06CorrAug08
+statusVec <- rep("resistant",dim(NCI60AssayData)[2])
+statusVec[ colnames(NCI60AssayData) %in% resistanceStatus$Sensitive ] <- "sensitive"
+
+NCI60PhenoData <- data.frame(status=as.factor(statusVec),row.names=colnames(NCI60AssayData))
+
+NCI60ESet <- ExpressionSet(assayData=NCI60AssayData,annotation="Affymetrix HG-U95Av2",phenoData=new("AnnotatedDataFrame", data=NCI60PhenoData))
+
+### format 07Numbers data into ESet
+doxo07AssayData <- as.matrix(doxorubicin07Numbers) # ESet() can't handle data.frame's
+doxo07PhenoData <- new("AnnotatedDataFrame", data=doxorubicin07Info)
+doxo07ESet <- ExpressionSet(assayData=doxo07AssayData,phenoData=doxo07PhenoData,annotation="Affymetrix HG-U133Av2")
+@
+\paragraph{\#1.} Following the direction in the ExpressionSet vignette we get
+<<q1b,echo=TRUE>>=
+NCI60ESet
+doxo07ESet
+@
+
+\paragraph{\#2.} \textit{QA/QC for training set}. Reconcile the training data in doxorubicinNCI60Scaled and doxorubicin07Numbers, i.e., match genes and samples and compare the expression measures and the sensitivity status assigned to the cell lines in the two datasets.
+
+First, we note that the number of features differs between expression sets, so let's check if all the genes in the ``doxo'' expression set were also measured in the NCI expression set. 
+<<q2a,echo=TRUE>>=
+all(rownames(doxo07ESet) %in% rownames(NCI60ESet))
+@
+
+Next, we ``line'' the corresponding features up by annotating the doxo expression set. Then, we examine how well the expression measures match up.
+<<q2b>>=
+indexOfRowInNCI60 <- match(rownames(doxo07ESet),rownames(NCI60ESet)) 
+rowMap <- data.frame(NCI60index=indexOfRowInNCI60,row.names=rownames(doxo07ESet))
+featureData(doxo07ESet) <- new("AnnotatedDataFrame",data=rowMap)
+
+### example usage
+NCI60and07GeneESet <- NCI60ESet[fData(doxo07ESet)$NCI60index,]
+
+### check out how well the columns line up
+diffs <- sapply(X=seq(0,0.06,0.01),FUN=function(diff) {
+  sum(abs(exprs(doxo07ESet[,1:22]) - exprs(NCI60and07GeneESet)) > diff)
+})
+names(diffs) <- seq(0,0.06,0.01)
+
+### report percent of cells which aren't
+### equal, by size of difference
+diffs / (dim(doxo07ESet)[1]*22) * 100 
+@
+As we can see, no entries differ by more than 0.06, and even then, the amount that differ by less than 0.5\% differ by more than 0.02.
+
+Next we reconcile the column names:
+<<q2c>>=
+### reconcile column names:
+set.seed(1234)
+random.row <- sample(1:8958,size=1)
+exprs(NCI60and07GeneESet[rownames(doxo07ESet)[random.row],]) - exprs(doxo07ESet[random.row,1:22])
+@
+Clearly, the columns line up.
+
+Finally, we check to make sure that the reported resistances inside the the doxo expression set match those with the NCI data.
+<<q2d>>=
+sampleNames(doxo07ESet)[1:22] <- sampleNames(NCI60and07GeneESet)
+
+### investigate resistances;
+all(rownames(pData(doxo07ESet)[1:22,]) == rownames(pData(NCI60and07GeneESet))) # T
+### row names line up, so check statii
+levels(pData(NCI60and07GeneESet)$status) <- levels(pData(doxo07ESet)[1:22,2])
+which(pData(doxo07ESet)[1:22,2] != pData(NCI60and07GeneESet)$status)
+@
+Problematically, they're completely flipped.
+
+\paragraph{\#3.}\textit{QA/QC for test set}. Consider now the test data in doxorubicin07Numbers. Is there anything unusual with the samples and their assigned sensitivity stati? Hint: Use dimensionality reduction and clustering methods.
+
+First, we shift the data away from zero by 0.1, then log-transform it. Then, we cluster the transformed data.
+<<q3a>>=
+doxo07TestESet <- doxo07ESet[,-(1:22)]
+
+### add 0.1 to data, log it, and transpose it
+transTestData <- t(log(exprs(doxo07TestESet)+0.1))
+
+### look at 2-cluster of testData 
+library(cluster)
+pam.results <- pam(transTestData,2)
+
+### consider the stati of the medoids
+doxo07TestESet$status[pam.results$id.med]
+
+### table the clusters to get an idea of heterogeneity
+table(doxo07TestESet$status[which(pam.results$clustering == 1)])
+
+table(doxo07TestESet$status[which(pam.results$clustering == 2)])
+@
+Pam doesn't convince us that, as of now, there's any reason we should be able to cluster about resistance status. As we can see, there's little intra-cluster homogeneity; If we consider PCA,
+<<q3b>>=
+pca.results <- prcomp(transTestData)
+
+### kaiser criterion
+max(which(pca.results$sdev^2 >= 1))
+
+### consider how many until 90% of variation is obtained
+min(which(cumsum(pca.results$sdev)/sum(pca.results$sdev)>=0.9)) 
+@
+<<q3c,echo=FALSE,dev='pdf',out.width="0.65\\textwidth",fig.align='center',fig.cap="scores of genetic signatures with respect to the first two principle components">>=
+library(ggplot2)
+ggplot(data=as.data.frame(pca.results$x),aes(x=PC1, y=PC2,color=doxo07TestESet$status)) + geom_text(aes(label=rownames(pca.results$x)),alpha=0.5,size=4) + scale_color_discrete(name="")
+@
+Figure 1 indicates that the first principle component captures barely enough variability to \textit{almost} separate the resistant cell lines from the sensitive cell lines. But, honestly, I'm not convinced.
+
+\paragraph{\#4a.} \textit{Between-sample normalization}\ldots{} Perform between-sample normalization and comment on the results.
+
+Let's transform the training data as we did with the previous expression set, and investigate the inter-column differences via mean-difference plots (see figure 2).
+<<q4a>>=
+transTrainData <- log(exprs(NCI60ESet)+0.1)
+transTrainData <- as.data.frame(transTrainData)
+
+mdPlots <- apply(X=combn(x=22,m=2),MARGIN=2,FUN=function(cols){
+  cell1 <- transTrainData[,cols[1]]
+  cell1.name <- colnames(transTrainData)[cols[1]]
+  cell2 <- transTrainData[,cols[2]]
+  cell2.name <- colnames(transTrainData)[cols[2]]
+  title <- paste("Mean-Difference plot for X=", cell1.name, " and Y=", cell2.name, " cell lines", sep="")
+  mdPlot <- ggplot(data=data.frame(X=cell1,Y=cell2),aes(x=(X+Y)/2, y=Y-X)) + geom_point(alpha=0.25) + geom_hline(color='red',yintercept=0) + labs(title=title)
+})
+@
+<<q4b,results='hide',echo=FALSE,dev='pdf',out.width='0.49\\textwidth',fig.align='left',fig.keep='all',fig.show='hold',fig.cap="MD plots for various cell lines. Note the high amount of dispersion in all plots.">>=
+plots <- sample(x=1:choose(22,2),size=4,replace=F) # pick 4 random plots
+show(mdPlots[plots])
+@
+
+Figure 3 exhibits the variation in (log) intensity across the various cell lines, before quantile based normalization was employed. 
+
+<<q4c, echo=FALSE, dev='pdf',fig.cap="Box plots of variation in expression, across the various cell lines, before and after normalization.",fig.align='left',out.width="0.5\\textwidth",fig.show='hold'>>=
+library(reshape2)
+melted.df <- melt(transTrainData)
+melted.df <- transform(melted.df, value=as.numeric(value))
+
+ggplot(data=melted.df,aes(x=variable,y=value)) + stat_boxplot() + geom_hline(yintercept=0,color='red') + scale_color_discrete(guide=F) + labs(x="cell line", y="log(intensity)",title="non-normalized expression values") 
+
+library(affyPLM)
+transTrainESet <- ExpressionSet(as.matrix(transTrainData))
+normTrainESet <- normalize.ExpressionSet.quantiles(transTrainESet,transfn="none")
+
+### look at box plot
+normTrainData <- as.data.frame(exprs(normTrainESet))
+melted.df2 <- melt(normTrainData)
+melted.df2 <- transform(melted.df2, value=as.numeric(value))
+
+ggplot(data=melted.df2,aes(x=variable,y=value)) + stat_boxplot() + geom_hline(yintercept=0,color='red') + scale_color_discrete(guide=F) + labs(x="cell line", y="log(intensity)",title="quantile-based normalized expression values") 
+@
+
+\paragraph{\#4.b} \textit{Cluster analysis.} Apply dimensionality reduction and clustering (both hierarchical and partitioning) methods to the training set samples. Comment on the results and, in particular, relate the clustering to drug sensitivity.
+
+Performing a simple call to \texttt{pam}, and investigating the intra-cluster heterogeneity, we see that (again) \texttt{pam} fails to cluster on sensitivity.
+<<q4e>>=
+pam.results2 <- pam(k=2,x=t(normTrainData))
+
+### consider the stati of the medoids
+NCI60ESet$status[pam.results2$id.med]
+### great, medoids are of different stati
+
+### table the clusters to get an idea of heterogeneity
+table(NCI60ESet$status[which(pam.results2$clustering == 1)])
+
+table(NCI60ESet$status[which(pam.results2$clustering == 2)])
+@
+This is probably due to the fact that there's too much noise (i.e. the data is too high dimensional). 
+
+Now, if we perform PCA, and plot the scores of the training cell lines inside the PC1-PC2 plane (see figure 4), we see that there's a chance that these two components capture enough variability to create a classification criterion.
+<<q4f,echo=FALSE, dev='pdf',fig.cap="Scores of NCI60 cell lines in PC1-PC2 plane. Dotted line is a potential hyperplane with which classification may be made.",fig.align='center',out.width="0.65\\textwidth",fig.show='hold'>>=
+### do PCA
+pca.results2 <- prcomp(t(normTrainData))
+ggplot(data=as.data.frame(pca.results2$x),aes(x=PC1, y=PC2,color=NCI60ESet$status)) + geom_text(aes(label=rownames(pca.results2$x)),alpha=0.75,size=4) + geom_abline(intercept=0.5,slope=0.4,lty=2) + scale_color_discrete(name="")
+@
+<<q4g,echo=FALSE, dev='pdf',fig.cap="Dendogram of \\texttt{hclust} output. The red cells are resistant, whereas the green are sensitive. Note that, like \\texttt{pam}, top level clusters contain cell lines of both stati.",fig.align='center',out.width="0.65\\textwidth",fig.show='hold'>>=
+hclust.results <- hclust(d=dist(t(normTrainData)))
+#plot(hclust.results)
+
+### color dendrogram
+reds <<- as.factor(colnames(normTrainData)[ NCI60ESet$status == "resistant"]) 
+greens <<- as.factor(colnames(normTrainData)[ NCI60ESet$status == "sensitive"]) 
+
+#define a function for coloring and sizing node elements: 
+colLab <- function(n) { 
+  if(is.leaf(n)) { 
+    a <- attributes(n) 
+    if ( length(which(greens == a$label)) == 1 ) { 
+      attr(n, "nodePar") <- c(a$nodePar, list(lab.col = "green", lab.cex=.7, col="blue", pch=16 )) 
+    } else { 
+      attr(n, "nodePar") <- c(a$nodePar, list(lab.col = "red", lab.cex=.7,col="red", pch=16)) 
+    }   
+  } 
+  return(n)
+} 
+
+#modfiy dendrogram nodes and re-plot 
+dend_colored <- dendrapply(as.dendrogram(hclust.results), colLab) 
+plot(dend_colored)
+@
+
+\paragraph{\#4c.} \textit{Differential expression.} Identify genes that are differentially expressed between “Resistant” and “Sensitive” cell lines and compare your list with the signature of Potti et al. (2006) stored in doxorubicinGenes. In particular, state which test statistics you are using and, in the case of any probabilistic statement, state and justify the underlying assumptions. Provide and comment on numerical and graphical summaries of the results.
+
+In the absense of any better ideas, I decided to test for differential expression via a two-sample t-test. My use of this test isn't justified, since you'd normally hope that your data was normally distributed (or at least, normal like). However, there's no reason the intensity (or even $\log(\text{intensity})$) is Gaussian, so that's a problem. I can only partially justify my choice of the t-test, with it's the simplest test we could perform. Nothing that follows uses any probabilistic implications of high (or low) t-statistic values, so at least there's that.
+<<q4h>>=
+normSensESet <- normTrainESet[,NCI60ESet$status == "sensitive"]
+normResESet <- normTrainESet[,NCI60ESet$status == "resistant"]
+
+normSensDataTrans <- t(exprs(normSensESet))
+normResDataTrans <- t(exprs(normResESet))
+
+tTestResults <- sapply(X=1:12625,FUN=function(gene){
+  t.test(x=normResDataTrans[,gene],y=normSensDataTrans[,gene])$statistic
+})
+@
+See figure 6 for distribution of t-statistics.
+<<q4hplot, echo=FALSE, dev='pdf',fig.cap="Distribution of t-statistics.",fig.align='center',out.width="0.65\\textwidth",fig.show='hold'>>=
+ggplot(data=data.frame(X=tTestResults)) + stat_boxplot(aes(x="t statistic",y=X))
+@
+What we can do with these statistics, however, is sort through the top most 80, bottom most 80, or 80 values with largest magnitude. We can then comparing the genes associated to these values with those selected in the Potti et. al paper. 
+<<q4i>>=
+### compare my top 80 with theirs
+mostDifferentialGenes <- colnames(normSensDataTrans)[which(tTestResults %in% sort(tTestResults,decreasing=T)[1:80])]
+
+length(which(mostDifferentialGenes %in% doxorubicinGenes))
+
+### check for top 80 absolutely differential expression
+mostAbsDiffGenes <- colnames(normSensDataTrans)[which(abs(tTestResults) %in% sort(abs(tTestResults),decreasing=T)[1:80])]
+
+length(which(mostAbsDiffGenes %in% doxorubicinGenes)) 
+
+### top 80 negatively expressed
+mostNegDiffGenes <- colnames(normSensDataTrans)[which(tTestResults %in% sort(tTestResults)[1:80])]
+
+length(which(mostNegDiffGenes %in% doxorubicinGenes))
+@
+I'm not sure if I'm supposed to be negatively or positively surprised by the fact that I couldn't get a complete overlap in the list of genes I selected versus those in the paper. This could either be due to my naive selection method, or the fact that Potti et. al didn't consider selecting their genes from the NCI60 data.
+
+Since I can't/couldn't find any reason to believe we should look at signed differential expression, I went ahead and considered the most differentially expressed genes those whose t-test's statistic had the largest magnitude (positive or negative). Using those genes, I did PCA, hierarchiel clustering, and implemented an SVM to see if I could build my own predictor on those genes alone.
+
+<<q4j,echo=FALSE, dev='pdf',fig.cap="Dendogram of \\texttt{hclust} output for 80 selected genes. The red cells are resistant, and the green are sensitive. Note that, all levels contain cell lines of the same status.",fig.align='center',out.width="0.65\\textwidth",fig.show='hold'>>=
+mostAbsExprGenesESet <- normTrainESet[mostAbsDiffGenes,]
+transMostAbsExprGeneData <- t(exprs(mostAbsExprGenesESet))
+my.hclust.results <- hclust(dist(transMostAbsExprGeneData))
+dend_colored2 <- dendrapply(as.dendrogram(my.hclust.results), colLab) 
+plot(dend_colored2) # these genes yield the right kind of clustering
+@
+<<q4k,echo=FALSE, dev='pdf',fig.cap="Scores of NCI60 cell lines in PC1-PC2 plane when only considered 80 selected genes as features.",fig.align='center',out.width="0.65\\textwidth",fig.show='hold'>>=
+my.pca.results <- prcomp(transMostAbsExprGeneData)
+ggplot(data=as.data.frame(my.pca.results$x),aes(x=PC1, y=PC2,color=NCI60ESet$status)) + geom_text(aes(label=rownames(my.pca.results$x)),alpha=1,size=4) + scale_color_discrete(name="")
+@
+From figure 8, we see that the PC1-PC2 plane seems to have the different stati well separated. This gives me hope that an SVM might be able to work here.
+<<q4l>>=
+library(e1071)
+svm.model <- svm(x=transMostAbsExprGeneData, y=NCI60ESet$status)
+table(predict(svm.model,transMostAbsExprGeneData),NCI60ESet$status)
+@
+Indeed, on the training set, the SVM has 100\% accuracy. Now, we just need to train an SVM to the test data, but using genes common to both the doxo and NCI60 data sets.
+<<q4m>>=
+commonDiffGenes <- mostAbsDiffGenes[mostAbsDiffGenes %in% rownames(doxo07ESet)]
+common.svm.model <- svm(x=transMostAbsExprGeneData[,commonDiffGenes], y=NCI60ESet$status)
+table(predict(common.svm.model,transMostAbsExprGeneData[,commonDiffGenes]),NCI60ESet$status) 
+@
+<<q4n,echo=FALSE, fig.keep='none'>>=
+### test this out on patients
+testESet <- doxo07ESet[commonDiffGenes,-(1:22)]
+transTestData <- log(exprs(testESet)+0.1)
+normTestESet <- normalize.ExpressionSet.quantiles(ExpressionSet(transTestData),transfn="none")
+normTestData <- as.data.frame((exprs(normTestESet)))
+
+### check box plot
+melted.df3 <- melt(normTestData)
+melted.df3 <- transform(melted.df3, value=as.numeric(value))
+ggplot(data=melted.df3,aes(x=variable,y=value)) + stat_boxplot() + geom_hline(yintercept=0,color='red') + scale_color_discrete(guide=F) + labs(x="test patient", y="log(intensity)",title="quantile-based normalized expression values")
+@
+<<q4o>>=
+### try svm on patients
+### refactor status first
+levels(doxo07ESet$status) <- levels(NCI60ESet$status)
+table(predict(common.svm.model,t(normTestData)),doxo07ESet$status[-(1:22)]) 
+### calculate accuracy
+sum(predict(common.svm.model,t(normTestData)) == doxo07ESet$status[-(1:22)])/122 
+@
+So while that was a good idea, it turns out our simple SVM only achieves 45\% accuracy. One explanation for this can come from looking at the scores in the PC1-PC2 plane found previously (see figure 9).
+<<4qp,echo=FALSE, dev='pdf',fig.cap="Scores of test patients over PC1-PC2 plane calculated from same data to train SVM on.",fig.align='center',out.width="0.65\\textwidth",fig.show='hold'>>=
+common.pca.results <- prcomp(transMostAbsExprGeneData[,commonDiffGenes])
+test.principle.coords <- as.data.frame(t(normTestData) %*% common.pca.results$rotation)
+
+ggplot(data=as.data.frame(common.pca.results$x),aes(x=PC1, y=PC2,color=NCI60ESet$status)) + geom_text(aes(label=rownames(common.pca.results$x)),alpha=1,size=4) + geom_text(data=test.principle.coords, aes(x=PC1, y=PC2, label=rownames(test.principle.coords),color=doxo07ESet$status[-(1:22)]),alpha=0.5) + scale_color_discrete(name="")
+@
+
+\end{document}

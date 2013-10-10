@@ -6,3 +6,6 @@
 *.Rproj
 *.log
 *.gz
+*cache*
+*.rdb
+*.rdx
