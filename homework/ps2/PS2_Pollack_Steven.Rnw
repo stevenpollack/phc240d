@@ -1,0 +1,155 @@
+\documentclass[10pt,titlepage]{article}
+
+\usepackage{fancyhdr,palatino,amsmath,amssymb,hyperref}
+\usepackage[textwidth=6.5in, textheight=8.5in]{geometry}
+
+%%%%% knitr code to make sure things stay inside listings box:
+\usepackage{listings}
+\usepackage{inconsolata}
+
+\lhead{PHC240D}
+\chead{Problem Set \#1}
+\rhead{Steven Pollack -- 24112977}
+\cfoot{\thepage}
+
+\title{PHC240D \\ Problem Set \#1}
+\author{Steven Pollack \\ 24112977}
+\date{}
+
+\newcommand{\Q}{\mathcal{Q}}
+\renewcommand{\H}{\mathcal{H}}
+\newcommand{\N}{\mathcal{N}}
+\newcommand{\K}{\mathcal{K}}
+\newcommand{\U}{\mathcal{U}}
+\renewcommand{\u}{\mathbf{u}}
+\renewcommand{\v}{\mathbf{v}}
+\newcommand{\I}{\mathbf{I}}
+\newcommand{\x}{\mathbf{x}}
+\newcommand{\X}{\mathbf{X}}
+\newcommand{\Y}{\mathbf{Y}}
+\newcommand{\one}{\mathbf{1}}
+\newcommand{\R}{\mathbb{R}}
+\DeclareMathOperator{\cS}{colSums}
+\DeclareMathOperator{\sgn}{sgn}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator{\cov}{cov}
+\DeclareMathOperator{\supp}{supp}
+\DeclareMathOperator{\col}{col}
+\DeclareMathOperator{\proj}{proj}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\logit}{logit}
+\DeclareMathOperator{\expit}{expit}
+\DeclareMathOperator{\argmin}{argmin}
+\DeclareMathOperator{\argmax}{argmax}
+
+\begin{document}
+\maketitle
+\pagestyle{empty}
+\newpage
+\pagestyle{fancy}
+
+<<globalParameters,echo=FALSE,cache=FALSE>>=
+set.seed(1234)
+opts_chunk$set(comment="#",cache=T,echo=F,tidy=F,warning=FALSE,message=FALSE,highlight=T,echo=T,cache=T)
+@
+
+<<stayInside,echo=FALSE>>=
+  options(width=60)
+  listing <- function(x, options) {
+     paste("\\begin{lstlisting}[basicstyle=\\ttfamily,breaklines=true]\n", x,"\\end{lstlisting}\n", sep = "")
+  }
+  
+  knit_hooks$set(source=listing, output=listing)
+@
+\paragraph{\#1.} Assuming the numerator layout (i.e. $\nabla f(\x)$ is a row-vector), we have vector-calculus identities
+\begin{align*}
+\frac{\partial \x}{\partial \x} &= \I \\
+\frac{\partial A\x}{\partial\x} &= A \\
+\frac{\partial \x^{T}A}{\partial \x} &= A^{T} \\
+\frac{\partial \u(\x)^{T} \v(\x)}{\partial\x} &= \u^{T} \frac{\partial\v}{\partial\x} + \v^{T}\frac{\partial\u}{\partial\x}
+\end{align*}
+Hence, 
+\begin{align*}
+\frac{\partial \left\| \Y - \X\beta\right\|_{2}^{2}}{\partial \beta} &= \frac{\partial (\Y-\X\beta)^{T} (\Y-\X\beta)}{\partial\x} \\
+&= (\Y-\X\beta)^{T} \frac{\partial(Y-\X\beta)}{\partial\x} + (\Y-\X\beta)^{T}\frac{\partial(\Y-\X\beta)}{\partial\x} \\
+&= (\Y-\X\beta)^{T}(-2\X) \\
+&= -2\Y^{T}\X + 2\beta^{T}\X^{T}\X \tag{a}\label{eq:calc_identity}
+\end{align*}
+If we write $\beta = (\beta_0,\vec{\beta})$ and $\X=(\one,\X_{J})$, where $J$ is the dimension of $\Y$, and set $L$ to be the standard loss function for OLS, we have 
+\[
+L(\beta) = \left\| \Y - \beta_0\one - \X_{J}\vec{\beta} \right\|_{2}^{2} \equiv \left\| \tilde{\Y} - \X_{J}\vec{\beta} \right\|_{2}^{2}
+\]
+Hence, the identity in (\ref{eq:calc_identity}) implies that
+\begin{align*}
+\frac{\partial L}{\partial\vec{\beta}} &= -2\tilde{\Y}^{T}\X_{J} + 2\vec{\beta}^{T}\X_{J}^{T}\X_{J} 
+\intertext{For the scalar $\beta_0$:}
+\frac{\partial L}{\partial\beta_0} &= \frac{\partial}{\partial\beta_0}\left( \Y^{T}\Y - 2 \beta_0 \Y^{T}\one - \Y^{T}\one\vec{\beta} + \beta_0^2 \one^{T}\one + \beta_0 \one^{T}\X_{J} \vec{\beta} - \vec{\beta}^{T}\X_{J}\Y + \beta_0 \beta^{T}\X_{J}^{T}\one + \vec{\beta}^{T}\X_{J}^{T}\X_{J}\vec{\beta}\right) \\
+&=-2\Y^{T}\one + 2 J \beta_0 + 2 \vec{\beta}^{T} \X_{J}^{T} \one \\
+&\stackrel{\dag}{=} -2\Y^{T}\one + 2 J \beta_0 
+\end{align*}
+where the equality following $\dag$ comes from the assumption that $\X_{J}$ is column-centered. Hence, solving for $\beta_{OLS}$ such that $\beta_{OLS} = \argmin_{\beta} L(\beta)$, yields
+\begin{equation*}
+ \beta_{OLS} = \begin{pmatrix} \overline{\Y} \\ (\X_{J}^{T}\X_{J})^{-1}\X_{J}^{T} \tilde{\Y} \end{pmatrix}
+\end{equation*}
+ When $\X_{J}$ is orthogonal (and therefore column-centered), it follows that
+ \begin{equation}\label{eq:ols}
+  \beta_{OLS} = \begin{pmatrix} \overline{\Y} \\ \X_{J}^{T} \tilde{\Y} \end{pmatrix}
+ \end{equation}
+ 
+ Now, from our ability to write the loss function associated to ridge regression as 
+\[
+f(\beta) = \left\| \Y - \beta_0\one - \X_{J}\vec{\beta} \right\|_{2}^{2} + \lambda \left\|\vec{\beta}\right\|_{2}^{2} 
+\]
+the same work above demonstrates that
+\begin{align*}
+\frac{\partial f}{\partial\beta_0} &= -2\Y^{T}\one + 2 J \beta_0  + 2 \vec{\beta}^{T} \X_{J}^{T} \one 
+\intertext{and from (\ref{eq:calc_identity}) and $\nabla \|x\|_{2}^{2} = 2 x^{T} \I$:}
+\frac{\partial f}{\partial\vec{\beta}} &= -2\tilde{\Y} \X_{J} + 2 \vec{\beta}^{T} \X_{J}^{T} \X_{J} + 2 \lambda \vec{\beta}^{T}\I
+\end{align*}
+
+Thus, the $\beta_{ridge} = \argmin_{\beta} f(\beta)$ sets both equations above to zero, and therefore must satisfy
+\begin{equation*}
+\beta_{ridge} = \begin{pmatrix} \overline{\Y} \\ (\X_{J}^{T}\X_{J} + \lambda\I)^{-1}\X_{J}^{T}\tilde{\Y} \end{pmatrix} 
+\end{equation*}
+which, in the case of an orthogonal $\X_{J}$, reduces to
+\begin{equation}\label{eq:ridge}
+\beta_{ridge} = \begin{pmatrix} \overline{\Y} \\ (1 + \lambda)^{-1}\X_{J}^{T}\tilde{\Y} \end{pmatrix} = \begin{pmatrix} 1 & 0 \\ 0 & (1+\lambda)^{-1} \I_{J} \end{pmatrix} \beta_{OLS}
+\end{equation}
+Finally, given the LASSO loss function
+\[
+g(\beta) = \left\| \Y - \beta_0\one - \X_{J}\vec{\beta} \right\|_{2}^{2} + \lambda \left\|\vec{\beta}\right\|_{1} 
+\]
+we see that with the same setup as in ridge (i.e. a column-centered design matrix) the intercept term that minimizes $g$ will, again, be $\beta_0 = \overline{\Y}$. However, the use of the $L_1$-loss for $\vec{\beta}$ changes the values for $\vec{\beta}$:
+\begin{align*}
+\frac{\partial g}{\partial\vec{\beta}} &= -2\tilde{\Y}^T\X_{J} + 2\vec{\beta}^{T}\X_{J}^T \X_{J} + \lambda \frac{\partial |\vec{\beta}|^{T} \one}{\partial\vec{\beta}} \\
+&= -2\tilde{\Y}^T\X_{J} + 2\vec{\beta}^{T}\X_{J}^T \X_{J} + \lambda \sgn(\vec{\beta})^{T} \\
+&\stackrel{\dag\dag}{=} -2\vec{\beta}_{OLS}^{T} + 2\vec{\beta}^{T} + \lambda \sgn(\vec{\beta})^{T} \equiv 0 \tag{3}\label{eq:lasso}
+\end{align*}
+where the identity following $\dag\dag$ assumes and orthogonal $\X$, and $\sgn(\x) = (\sgn(x_1),\ldots, \sgn(x_n))^{T}$ and $\sgn(x) = I(x > 0) - I(x < 0)$. Now, the system of equations in (\ref{eq:lasso}) doesn't have a closed form solution, however for a particular coefficient, $\beta_j$:
+\begin{align*}
+\beta_j &= \begin{cases} \beta_{OLS,j} - \dfrac{\lambda}{2} &\text{ if $\beta_j > 0$} \\
+\beta_{OLS,j}  &\text{ if $\beta_j = 0$} \\
+\beta_{OLS,j} + \dfrac{\lambda}{2} &\text{ if $\beta_j < 0$}
+\end{cases} \\
+&= \begin{cases} \beta_{OLS,j} - \dfrac{\lambda}{2} &\text{ if $\beta_{OLS,j} > 0$} \\
+0  &\text{ if $\beta_{OLS,j} = 0$} \\
+\beta_{OLS,j} + \dfrac{\lambda}{2} &\text{ if $\beta_{OLS,j} < 0$}
+\end{cases} \\
+&= \begin{cases} \beta_{OLS,j} - \dfrac{\lambda}{2} &\text{ if $2\beta_{OLS,j} > \lambda$} \\
+0  &\text{ if $-\lambda \leq 2 \beta_{OLS,j} \leq \lambda$} \\
+\beta_{OLS,j} + \dfrac{\lambda}{2} &\text{ if $2\beta_{OLS,j} < \lambda$}
+\end{cases} \tag{b}\label{eq:lasso2}
+\end{align*}
+Note that the case analysis in (\ref{eq:lasso2}) explains why LASSO tends to zero-out coefficients. % make figure for this!
+
+Now, assuming that $\cov(\Y,\Y | \X) = \sigma^{2} \I_{J}$, we calculate the effective degrees of freedom for $\widehat{\Y} = \X\beta_{ridge}$ (when $\X_{J}$ is orthogonal) via
+\begin{align*}
+df(\Y,\widehat{\Y})_{\lambda} &= \frac{1}{\sigma^2} \tr\left(\cov(\Y, \X\beta_{ridge}|\X )\right) \\
+&= \frac{1}{\sigma^{2}}  \tr\left(\cov(\Y, \overline{\Y}\one_{J} + \X_J (1+\lambda)^{-1}\I_J \X_{J}^{T} \tilde{\Y}|\X) \right) \\
+&= \frac{1}{\sigma^{2}}  \tr\left(\cov(\Y, \overline{\Y}\one_{J}|\X) + (1+\lambda)^{-1} \cov(\Y, \X_J \I_J \X_{J}^{T} \tilde{\Y}|\X) \right) \\
+&= \frac{1}{\sigma^{2}} \tr\left(\frac{\cov(\Y,\one_{J\times J}\Y|\X)}{J} + \frac{\cov(\Y,\tilde{\Y}|\X) \X_{J}^{T}\X_{J}}{1+\lambda} \right) \\
+&= \frac{1}{\sigma^{2}} \tr\left(\frac{\cov(\Y,\Y|\X)\one_{J\times J}^{T}}{J} + \frac{\cov(\Y,\Y|\X) \I_{J} }{1+\lambda} \right) \\
+&= \frac{1}{\sigma^{2}} \tr\left(\frac{\sigma^{2}\I_{J}\one_{J\times J}^{T}}{J} + \frac{\sigma^2\I_J}{1+\lambda} \right) \\
+&=  1 + \frac{J}{1+\lambda} 
+\end{align*}
+\end{document}
