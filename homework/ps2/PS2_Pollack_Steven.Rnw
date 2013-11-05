@@ -16,6 +16,7 @@
 \author{Steven Pollack \\ 24112977}
 \date{}
 
+\newcommand{\E}{\mathbb{E}}
 \newcommand{\Q}{\mathcal{Q}}
 \renewcommand{\H}{\mathcal{H}}
 \newcommand{\N}{\mathcal{N}}
@@ -152,4 +153,54 @@ df(\Y,\widehat{\Y})_{\lambda} &= \frac{1}{\sigma^2} \tr\left(\cov(\Y, \X\beta_{r
 &= \frac{1}{\sigma^{2}} \tr\left(\frac{\sigma^{2}\I_{J}\one_{J\times J}^{T}}{J} + \frac{\sigma^2\I_J}{1+\lambda} \right) \\
 &=  1 + \frac{J}{1+\lambda} 
 \end{align*}
+Since the work above also shows that $\hat{\Y} = \overline{\Y} \one_{J} + (1+\lambda)^{-1}\tilde{\Y}$, we have that
+\begin{align*}
+\cov(\hat{\Y},\hat{\Y}|\X)_{\lambda} &= \overline{\Y}^2 \cov(\one_{J},\one_{J}|\X) + \frac{2 \overline{\Y}}{1+\lambda} \cov(\one_{J},\tilde{\Y}|\X) + \frac{1}{(1+\lambda)^2}\cov(\tilde{\Y},\tilde{\Y}|\X) \\ 
+&= \frac{1}{(1+\lambda)^2} \cov(\Y+c,\Y+c|\X) \\
+&= \frac{1}{(1+\lambda)^2} \cov(\Y,\Y|\X) \\
+&= \frac{\sigma^2}{(1+\lambda)^2} \I_{J} 
+\intertext{and,}
+\E[\hat{\Y}|\X]_{\lambda} - \X\beta &= \E[\overline{\Y} \one_{J} + (1+\lambda)^{-1}\tilde{\Y} |\X] -\X\beta \\
+&= \E[(1-(1+\lambda)^{-1})\overline{\Y}\one_{J} + (1+\lambda)^{-1}\Y|\X] \\
+&= \left(1-\frac{1}{1+\lambda}\right)\overline{\Y}\one_{J} + \frac{1}{1+\lambda}\E[\Y|\X] - \X\beta \\
+&=  \left(1-\frac{1}{1+\lambda}\right)\overline{\Y}\one_{J} + \left(\frac{1}{1+\lambda} - 1\right) \X\beta \\
+&= \left( 1- \frac{1}{1+\lambda}\right)\left( \overline{\Y} \one_J - \X\beta\right)
+\end{align*}
+
+\paragraph{\#2.} 
+\begin{enumerate}
+  \item[a)]In Bayesian inference, parameter estimates are usually taken to be the posterior mode (or median). In the case of unimodal distributions, this is equivalent to finding $\argmax_{\theta} P(\theta | \vec{x})$. Given, that we're assuming that $\Y_n | \X_n, \beta \sim N(\X_n \beta, \sigma^2 \I_n)$, that is
+\[
+  f_{\Y_n|\X_n,\beta}(\vec{y}) = \frac{1}{\sqrt{(2\pi \sigma^2)^n}}\exp\left(\frac{\left\|\vec{y}-\X_n\beta\right\|_{2}^{2}}{2\sigma^2}\right)
+\]
+and from the identity $\argmax_x f(x) = \argmin_{x} -\log(f(x))$, we may write
+\begin{align*}
+\beta_{ridge} &= \argmax_{\beta} P(\beta|\vec{y}, \X_n) \\
+              &= \argmin_{\beta} -\log(P(\beta|\vec{y}, \X_n)) \\
+              &= \argmin_{\beta} -\log(f_{\Y_n|\X_n,\beta}(\vec{y})) - \log(\pi(\beta))\\
+              &= \argmin_{\beta} c + \left(\frac{\left\|\vec{y}-\X_n\beta\right\|_{2}^{2}}{2\sigma^2}\right) - \log(\pi(\beta)) \\
+              &= \argmin_{\beta}  \left\|\vec{y}-\X_n\beta\right\|_{2}^{2} - {2\sigma^2}\log(\pi(\beta))
+\end{align*}
+However, $\beta_{ridge}$ is (clasically) defined to minimize the loss function $L(\beta) = \left\|\vec{y}-\X_n\beta\right\|_{2}^{2} + \lambda \left\|\beta\right\|_{2}^{2} $. Thus, we have the functional equality
+\[
+\argmin_{\beta}  \left\|\vec{y}-\X_n\beta\right\|_{2}^{2} - {2\sigma^2}\log(\pi(\beta)) = \beta_{ridge} = \argmin_{\beta} \left\|\vec{y}-\X_n\beta\right\|_{2}^{2} + \lambda \left\|\beta\right\|_{2}^{2}
+\]
+which is satisfied when 
+\[
+\pi(\beta) \propto \exp\left(-\frac{\left\|\beta\right\|_{2}^{2}}{2(\sigma^2/\lambda)}\right)
+\]
+Hence, the ridge regression estimator can be seen as the Bayesian estimator when the prior distribution for $\beta$ is taken such that $\beta \sim N(\mathbf{0}, \sigma^2\lambda^{-1} \I_{J})$. In this case we see that $\lambda$ can be seen as a hyper-parameter that expresses how much variation we expect the ridge coefficients to have. Whereby, the large the value of lambda, the more concentrated about 0 we think the coefficients should be.
+\item[b)]
+Playing the same game with $\beta_{LASSO}$, we have the equation
+\[
+\argmin_{\beta}  \left\|\vec{y}-\X_n\beta\right\|_{2}^{2} - {2\sigma^2}\log(\pi(\beta)) = \beta_{LASSO} = \argmin_{\beta} \left\|\vec{y}-\X_n\beta\right\|_{2}^{2} + \lambda \sum_{i=1}^{J} |\beta_i|
+\]
+which is satisfied when
+\[
+\pi(\beta) \propto \exp\left(-\dfrac{\sum_{i=1}^{n}|\beta_i|}{2\sigma^2/\lambda}\right)
+\]
+That is, when $\pi(\beta)$ is proportional to the product of kernels of Laplace random variables. Thus, assuming the prior of $\beta$ is $\beta \sim \text{Laplace}(\mu=0,b=2\sigma^2/\lambda)$, yields $\beta_{LASSO}$ as the Bayesian estimator (when our data are assumed to take on the form of a multivariate Gaussian). 
+
+Again, as with $\beta_{Ridge}$, we see the hyper-parameter $\lambda$ governs the spread of the prior distribution. Hence, the large the value of $\lambda$, the more confident we are that our coefficients should be concentrated about the mean (which is assumed to be zero). 
+\end{enumerate}
 \end{document}
