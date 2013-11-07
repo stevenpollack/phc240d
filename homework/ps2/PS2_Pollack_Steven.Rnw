@@ -29,6 +29,7 @@
 \newcommand{\X}{\mathbf{X}}
 \newcommand{\Y}{\mathbf{Y}}
 \newcommand{\one}{\mathbf{1}}
+\newcommand{\zero}{\mathbf{0}}
 \newcommand{\R}{\mathbb{R}}
 \DeclareMathOperator{\cS}{colSums}
 \DeclareMathOperator{\sgn}{sgn}
@@ -202,5 +203,55 @@ which is satisfied when
 That is, when $\pi(\beta)$ is proportional to the product of kernels of Laplace random variables. Thus, assuming the prior of $\beta$ is $\beta \sim \text{Laplace}(\mu=0,b=2\sigma^2/\lambda)$, yields $\beta_{LASSO}$ as the Bayesian estimator (when our data are assumed to take on the form of a multivariate Gaussian). 
 
 Again, as with $\beta_{Ridge}$, we see the hyper-parameter $\lambda$ governs the spread of the prior distribution. Hence, the large the value of $\lambda$, the more confident we are that our coefficients should be concentrated about the mean (which is assumed to be zero). 
+\end{enumerate}
+
+\paragraph{\#3.}
+\begin{enumerate}
+\item[a)]
+\item[b)]
+\item[c)]
+\item[d)] When $\X_n$ is column-centered (i.e. $\X_n^{T} \one_n = \zero_J$) ridge coefficients are calculated via
+\begin{equation}\label{eq:ridge_full}
+\beta_{ridge} = \begin{pmatrix} \overline{\Y}_n \\ (\X_n^{T} \X_{n} + \lambda \I_{J})^{-1} \X_n^{T} (\Y_n - \overline{\Y}_n\one_n) \end{pmatrix}
+\end{equation}
+Thus, given the model $\E[\Y_n | \X = (\one_n, \X_n)] = \X\beta = \beta_0 \one_n + \X_n \vec{\beta}$, we have that
+\begin{align*}
+\E(\overline{\Y}_n|\X) &= \frac{1}{n}\sum_{i=1}^{n} \E[Y_i | \X] \\
+&= \frac{1}{n}\one_n \X \beta \\
+&= \frac{1}{n}(n, \one_n \X_n) \beta \\
+&= \beta_0
+\intertext{Since $\X_n$ was taken to be column centered; and,}
+\E(\Y_n - \overline{\Y}_n\one_n | \X) &= \E[\Y_n | \X] - \E[\overline{\Y}_n|\X]\one_n \\
+&= \X\beta - \beta_0 \one_n \\
+&= \X_n\vec{\beta}
+\intertext{Hence,}
+\E[\beta_{ridge} | \X] &= \begin{pmatrix} \E[\overline{\Y}_n | \X] \\
+\E[(\X_n^{T} \X_{n} + \lambda \I_{J})^{-1} \X_n^{T} (\Y_n - \overline{\Y}_n\one_n) | \X]
+\end{pmatrix} \\
+&= \begin{pmatrix}\beta_0 \\
+(\X_n^{T} \X_{n} + \lambda \I_{J})^{-1} \X_n^{T} \E[\Y_n - \overline{\Y}_n\one_n | \X]
+\end{pmatrix} \\
+&= \begin{pmatrix}\beta_0 \\
+(\X_n^{T} \X_{n} + \lambda \I_{J})^{-1} \X_n^{T} \X_n \vec{\beta}
+\end{pmatrix}
+\end{align*}
+
+Furthermore, we can calculate the covariance matrix of $\beta_{ridge}$ via
+\begin{align*}
+\Sigma &\equiv \cov(\beta_{ridge},\beta_{ridge}|\X) \\
+&=
+\begin{pmatrix} 
+var(\overline{\Y}_n | \X) & (\cov(\overline{\Y}_n, \Y_n ) \X_n (\X_n^T \X_n + \lambda \I_{J})^{-1})^{T} \\ 
+\cov(\overline{\Y}_n, \Y_n ) \X_n (\X_n^T \X_n + \lambda \I_{J})^{-1} & (\X_n^T \X_n + \lambda \I_{J})^{-1} \X_n^{T} \cov(\Y_n, \Y_n | \X) \X_n (\X_n^T \X_n + \lambda \I_{J})^{-1} 
+\end{pmatrix} \\
+&= \sigma^2 \begin{pmatrix}
+n^{-1} & \zero_{J}^{T} \\
+\zero_{J} & (\X_n^T \X_n + \lambda \I_{J})^{-1}\X_n^T \X_n (\X_n^T \X_n + \lambda \I_{J})^{-1}
+\end{pmatrix}
+\end{align*}
+Hence, the variance of $\beta_{ridge}$ can be calculated via the diagonal of $\Sigma$. Putting this together and letting $b$ denote $\E[\beta_{ridge}]-\beta$, we have that the MSE of the $i^{th}$ coefficient estimate is
+\[
+\text{MSE}(\beta_{ridge}^{(i)}) = b^{2}_{i} + \diag(\Sigma)_{i}
+\]
 \end{enumerate}
 \end{document}
