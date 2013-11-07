@@ -1,4 +1,5 @@
 ### question 3 -- simulation study
+set.seed(1234)
 library(MASS) # for multivariate normal random variables
 library(glmnet) # for regression routines
 library(ggplot2) # for plotting
@@ -9,6 +10,9 @@ library(reshape2)
   rows <- 1:n
   exp.mat <- matrix(data=sapply(X=rows,FUN=function(i){abs(i-rows)}),ncol=n,byrow=T)
   return(rho ^ exp.mat)
+}
+.centerMat <- function(mat) {
+  apply(X=mat,MARGIN=2,FUN=function(col){col-mean(col)})
 }
 
 ### simulation parameters
@@ -23,8 +27,9 @@ n.training.set <- 1000
 
 .generateDataSet <- function(n.obs) {
   ### make X according to N(0,Gamma), Gamma follows AR(1)
+  ### make sure X is column-centered
   gamma <- .ar1CovMatrix(n=J, rho=rho)
-  X.learningSet <- mvrnorm(n=n.obs, mu=rep(0,times=J), Sigma=gamma)
+  X.learningSet <- .centerMat(mvrnorm(n=n.obs, mu=rep(0,times=J), Sigma=gamma))
   
   ### make Y according to Y | X ~ N(Xbeta,sigma^2)
   Y.learningSet <- rnorm(n=n.obs, mean=X.learningSet %*% beta, sd=sigma)
@@ -39,24 +44,25 @@ learning.set <- .generateDataSet(n.learning.set)
 training.set <- .generateDataSet(n.training.set)
 
 ### visualize learning set
-melted.learning.set <- melt(data=as.data.frame(learning.set),id.vars=c("Y"))
-
-### make scatterplot grid of Y vs. X_j
-scatterplot.grid <- ggplot(data=melted.learning.set,aes(y=Y,x=value,group=variable)) + geom_point() + facet_wrap(~ variable)
-
-### look at individual distributions of X_j's, Y, and X*beta
-viz.data <- cbind(learning.set,learning.set[,-11]%*%beta)
-colnames(viz.data) <- c(colnames(learning.set),"X*beta")
-
-covariate.boxplot <- ggplot(data=melt(data=as.data.frame(viz.data))) + stat_boxplot(aes(x=variable,y=value))
+.visualizeLearningSet <- function(learning.set) {
+  melted.learning.set <- melt(data=as.data.frame(learning.set),id.vars=c("Y"))
+  
+  ### make scatterplot grid of Y vs. X_j
+  scatterplot.grid <- ggplot(data=melted.learning.set,aes(y=Y,x=value,group=variable)) + geom_point() + facet_wrap(~ variable)
+  
+  ### look at individual distributions of X_j's, Y, and X*beta
+  viz.data <- cbind(learning.set,learning.set[,-11]%*%beta)
+  colnames(viz.data) <- c(colnames(learning.set),"X*beta")
+  
+  covariate.boxplot <- ggplot(data=melt(data=as.data.frame(viz.data))) + stat_boxplot(aes(x=variable,y=value))
+}
 
 ### examine properties of elastic net
 ### glm-net parametrization has the following:
 ###   alpha = 0 == ridge
 ###   alpha = 1 == LASSO
 ###   alpha = 1/3 == elastic net
-# 
-# regularization <- "elasticnet"
+
 .makeAndAnalyzeGlmnet <- function(regularization="ridge",standardize=T,intercept=T) {
   # set glmnet's alpha and lambda to coincide with classical parametrization
   switch(regularization,
@@ -105,6 +111,20 @@ covariate.boxplot <- ggplot(data=melt(data=as.data.frame(viz.data))) + stat_boxp
         FUN=function(predicted.values){mean((true.values - predicted.values)^2)}
   )
 }
+.calculateRidgeCoefs <- Vectorize(vectorize.args="lambda",FUN=function(X,Y,lambda){
+  J <- dim(X)[2] # number of features
+  X.t <- t(X); M <- X.t %*% X
+  A <- solve(M + lambda * diag(J))
+  A %*% X.t %*% Y
+})
+.calculateRidgeMSE <- Vectorize(vectorize.args="lambda",FUN=function(X,lambda,beta,sigma) {
+  J <- dim(X)[2] # number of features
+  X.t <- t(X); M <- X.t %*% X
+  A <- solve(M + lambda * diag(J))
+  bias <- (A %*% M - diag(J)) %*% beta
+  var <- sigma^2 * diag(A %*% M %*% A)
+  return(list(bias=bias,var=var,MSE=bias^2 + var))
+} )
 
 .makePlots <- function(glmnet.df,display.plots=F) {
 
@@ -150,44 +170,70 @@ covariate.boxplot <- ggplot(data=melt(data=as.data.frame(viz.data))) + stat_boxp
   
   return(list(p1=beta.vs.lambda,p2=df.vs.lambda,p3=beta.vs.df,p4=ls.MSE.plot,p5=ts.MSE.plot))
 }
-
-
-set.seed(1234)
-
 .calcOLSCoefs <- function(X,Y) {
   t.X <- t(X)
   solve(t.X %*% X) %*% t.X %*% Y
 }
 
-simulation.study1 <- .makeAndAnalyzeGlmnet()
-simulation.study3 <- .makeAndAnalyzeGlmnet(regularization="lasso")
-simulation.study2 <- .makeAndAnalyzeGlmnet(regularization="elasticnet")
+.performStudy <- function() {
+  simulation.study1 <- .makeAndAnalyzeGlmnet()
+  simulation.study3 <- .makeAndAnalyzeGlmnet(regularization="lasso")
+  simulation.study2 <- .makeAndAnalyzeGlmnet(regularization="elasticnet")
+  
+  combined.df <- rbind(simulation.study1$data.frame,simulation.study2$data.frame,simulation.study3$data.frame)
+  
+  ridge.t.MSE.min.indx <- which.min(simulation.study1$data.frame$training.set.MSE)
+  enet.t.MSE.min.indx <- which.min(simulation.study2$data.frame$training.set.MSE)
+  lasso.t.MSE.min.indx <- which.min(simulation.study3$data.frame$training.set.MSE)
+  
+  location.of.MSE.mins <- rbind(simulation.study1$data.frame[ridge.t.MSE.min.indx,],simulation.study2$data.frame[enet.t.MSE.min.indx,],simulation.study3$data.frame[lasso.t.MSE.min.indx,])
+  
+  melted.df <- melt(data=combined.df,id.vars=c("lambda","df","regularization")); head(melted.df)
+  mse.indx <- which(melted.df$variable %in% c("learning.set.MSE","training.set.MSE"))
+  
+  ### look at MSE vs. lambda for training and learning sets
+  ggplot(data=melted.df[mse.indx,],aes(x=lambda,y=value,color=regularization,lty=variable)) + geom_line() + geom_vline(data=location.of.MSE.mins,aes(xintercept=lambda,color=regularization),lty=8,alpha=0.75) + labs(x=expression(lambda),y="MSE")
+  
+  ### look at how coefficients vary with lambda
+  ggplot(data=melted.df[-mse.indx,],aes(x=lambda,y=value,color=variable)) + geom_line(show_guide=F) + geom_hline(yintercept=beta,alpha=0.5,lty=3) +  geom_vline(data=location.of.MSE.mins,aes(xintercept=lambda),lty=8,alpha=0.5) + geom_text(data=subset(x=melted.df[-mse.indx,],subset={lambda==0}),aes(label=variable,x=0,y=value,color=variable,group=regularization),show_guide=F,hjust=1,parse=T) + facet_grid(regularization~.) + labs(x=expression(lambda),y=expression(beta))
+  
+  ### compare "optimal" coefficients between all 4 methods
+  beta.OLS <- .calcOLSCoefs(X=learning.set[,1:J],Y=learning.set[,J+1])
+  extra.info <- rbind(data.frame(regularization="OLS",lambda=0,df=J,t(beta.OLS),learning.set.MSE=0,training.set.MSE=0,check.names=F),location.of.MSE.mins)
+  ggplot(data=melt(extra.info[,-(14:15)],id.vars=c("lambda","df","regularization")),aes(x=regularization,y=value,color=variable,group=variable)) + geom_point(show_guide=F) + geom_line(show_guide=F) + geom_hline(yintercept=beta,alpha=0.5,lty=3) + geom_text(data=melt(extra.info[1,-(14:15)],id.vars=c("lambda","df","regularization")),aes(label=variable,x=as.factor("OLS"),y=value),hjust=1.25,vjust=0,show_guide=F,parse=T) + labs(x="method",y=expression(beta))
+  
+  ### look at beta vs. df
+  ggplot(data=melted.df[-mse.indx,],aes(x=df,y=value,color=variable)) + geom_line(show_guide=F) + geom_point(data=melt(location.of.MSE.mins[,-(14:15)],id.vars=c("lambda","df","regularization")),aes(x=df,y=value),size=3,shape=2,show_guide=F) + geom_text(data=subset(x=melted.df[-mse.indx,],subset={df==10 & lambda==0}),aes(label=variable,x=10,y=value,color=variable,group=regularization),show_guide=F,hjust=-.05,parse=T) +  facet_grid(regularization~.) + labs(x="Effective Degrees of Freedom",y=expression(beta))
+  
+  ### check out df vs. lambda
+  ggplot(data=melted.df[-mse.indx,],aes(x=lambda,y=df,color=regularization)) + geom_line() + geom_vline(data=location.of.MSE.mins,aes(xintercept=lambda,color=regularization),lty=8,alpha=0.75)  + labs(x=expression(lambda),y="Effective Degrees of Freedom",title=expression(X[i]))
+  
+}
 
-combined.df <- rbind(simulation.study1$data.frame,simulation.study2$data.frame,simulation.study3$data.frame)
+out <- .calculateRidgeMSE(learning.set[,1:J],lambda.values,beta,sigma)
+out2 <- lapply(X=1:dim(out)[1],FUN=function(i){
+  row <- out[i,]
+  stat.name <- rownames(out)[i]
+  mat <- matrix(unlist(row),ncol=J,byrow=T,dimnames=list(lambda.values,paste("beta[",1:J,"]",sep="")))
+  return(data.frame(stat=stat.name,lambda=lambda.values,mat,check.names=F))
+})
+bias.df <- out2[[1]]; var.df <- out2[[2]]; mse.df <- out2[[3]]
 
-ridge.t.MSE.min.indx <- which.min(simulation.study1$data.frame$training.set.MSE)
-enet.t.MSE.min.indx <- which.min(simulation.study2$data.frame$training.set.MSE)
-lasso.t.MSE.min.indx <- which.min(simulation.study3$data.frame$training.set.MSE)
+melted.df <- melt(data=rbind(bias.df,var.df,mse.df),id.vars=c("stat","lambda")); head(melted.df)
+lapply(X=1:J,FUN=function(i){
+  ### double check that this is returning the min.
+  coef <- paste("beta[",i,"]",sep="")
+  relev.subset <- subset(x=melted.df,subset={variable==coef})
+  lambda.min <- with(data=subset(x=relev.subset,subset={stat=="MSE"}),expr={
+    lambda.values[which.min(value)]
+  })
+  ### calculate beta.ridge corresponding to lambda.min
+  beta.ridge <- .calculateRidgeCoefs(X=learning.set[,1:J],Y=learning.set[,J+1],lambda=lambda.min)[i]
+  plot.title <- substitute(atop(paste("bias, variance, and MSE for ", hat(beta)[i]), paste("minimal MSE at ", group("(",list(lambda,hat(beta)[i]),")") == group("(",list(lambda.min,beta.ridge),")"))),list(i=i,lambda.min=lambda.min,beta.ridge=beta.ridge))
+  
+  output <- ggplot(data=relev.subset,aes(x=lambda,y=value,group=stat:variable,lty=stat)) + geom_line() + geom_vline(xintercept=lambda.min,color='red') + labs(x=expression(lambda),y="",title=plot.title)
+  show(output)
+  return(list(plot=output,lambda.min=lambda.min,beta.ridge=beta.ridge))
+})
 
-location.of.MSE.mins <- rbind(simulation.study1$data.frame[ridge.t.MSE.min.indx,],simulation.study2$data.frame[enet.t.MSE.min.indx,],simulation.study3$data.frame[lasso.t.MSE.min.indx,])
-
-melted.df <- melt(data=combined.df,id.vars=c("lambda","df","regularization")); head(melted.df)
-mse.indx <- which(melted.df$variable %in% c("learning.set.MSE","training.set.MSE"))
-
-### look at MSE vs. lambda for training and learning sets
-ggplot(data=melted.df[mse.indx,],aes(x=lambda,y=value,color=regularization,lty=variable)) + geom_line() + geom_vline(data=location.of.MSE.mins,aes(xintercept=lambda,color=regularization),lty=8,alpha=0.75) + labs(x=expression(lambda),y="MSE")
-
-### look at how coefficients vary with lambda
-ggplot(data=melted.df[-mse.indx,],aes(x=lambda,y=value,color=variable)) + geom_line(show_guide=F) + geom_hline(yintercept=beta,alpha=0.5,lty=3) +  geom_vline(data=location.of.MSE.mins,aes(xintercept=lambda),lty=8,alpha=0.5) + geom_text(data=subset(x=melted.df[-mse.indx,],subset={lambda==0}),aes(label=variable,x=0,y=value,color=variable,group=regularization),show_guide=F,hjust=1,parse=T) + facet_grid(regularization~.) + labs(x=expression(lambda),y=expression(beta))
-
-### compare "optimal" coefficients between all 4 methods
-beta.OLS <- .calcOLSCoefs(X=learning.set[,1:J],Y=learning.set[,J+1])
-extra.info <- rbind(data.frame(regularization="OLS",lambda=0,df=J,t(beta.OLS),learning.set.MSE=0,training.set.MSE=0,check.names=F),location.of.MSE.mins)
-ggplot(data=melt(extra.info[,-(14:15)],id.vars=c("lambda","df","regularization")),aes(x=regularization,y=value,color=variable,group=variable)) + geom_point(show_guide=F) + geom_line(show_guide=F) + geom_hline(yintercept=beta,alpha=0.5,lty=3) + geom_text(data=melt(extra.info[1,-(14:15)],id.vars=c("lambda","df","regularization")),aes(label=variable,x=as.factor("OLS"),y=value),hjust=1.25,vjust=0,show_guide=F,parse=T) + labs(x="method",y=expression(beta))
-
-### look at beta vs. df
-ggplot(data=melted.df[-mse.indx,],aes(x=df,y=value,color=variable)) + geom_line(show_guide=F) + geom_point(data=melt(location.of.MSE.mins[,-(14:15)],id.vars=c("lambda","df","regularization")),aes(x=df,y=value),size=3,shape=2,show_guide=F) + geom_text(data=subset(x=melted.df[-mse.indx,],subset={df==10 & lambda==0}),aes(label=variable,x=10,y=value,color=variable,group=regularization),show_guide=F,hjust=-.05,parse=T) +  facet_grid(regularization~.) + labs(x="Effective Degrees of Freedom",y=expression(beta))
-
-### check out df vs. lambda
-ggplot(data=melted.df[-mse.indx,],aes(x=lambda,y=df,color=regularization)) + geom_line() + geom_vline(data=location.of.MSE.mins,aes(xintercept=lambda,color=regularization),lty=8,alpha=0.75)  + labs(x=expression(lambda),y="Effective Degrees of Freedom",title=expression(X[i]))
-
+ggplot(data=melted.df,aes(x=lambda,y=value,color=variable)) + geom_line(aes(group=stat:variable,lty=stat),show_guide=T) #+ facet_wrap(facets=~variable,nrow=4)#,labeller=label_parsed) 
