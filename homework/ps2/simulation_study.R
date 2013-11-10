@@ -66,7 +66,7 @@ library(reshape2)
   )
 }
 ### routine to calculate beta's and overal MSE for various regularization schemes
-.makeAndAnalyzeGlmnet <- function(regularization="ridge",standardize=F,intercept=T) {
+.makeAndAnalyzeGlmnet <- function(learning.set, training.set, regularization="ridge",standardize=F,intercept=T) {
   # note: analysis does not require columns of X to be anything other
   # than column-centered, which is taken care of during generation.
   # so perform glmnet without standardization
@@ -150,9 +150,14 @@ training.set <- .generateDataSet(n.training.set,J,rho)
 ### 3) examine properties of regularization
 
 ### make coefficients for each regularization scheme
-ridge.study <- .makeAndAnalyzeGlmnet(); ridge.study.df <- ridge.study$data.frame
-lasso.study <- .makeAndAnalyzeGlmnet(regularization="lasso"); lasso.study.df <- lasso.study$data.frame
-enet.study <- .makeAndAnalyzeGlmnet(regularization="elasticnet"); enet.study.df <- enet.study$data.frame
+ridge.study <- .makeAndAnalyzeGlmnet(learning.set, training.set)
+ridge.study.df <- ridge.study$data.frame
+
+lasso.study <- .makeAndAnalyzeGlmnet(learning.set, training.set, regularization="lasso")
+lasso.study.df <- lasso.study$data.frame
+
+enet.study <- .makeAndAnalyzeGlmnet(learning.set, training.set, regularization="elasticnet")
+enet.study.df <- enet.study$data.frame
 
 
 ### find lambda associated to minimal traning risk
@@ -230,33 +235,100 @@ coef.comparison <- data.frame(ridge.indv.study.df[,1:2],t(location.of.MSE.mins[1
 colnames(coef.comparison) <- c("covariate","aggregated","argmin")
 coef.comparison.plot <- ggplot(data=melt(coef.comparison),aes(x=covariate,fill=variable)) + geom_bar(aes(weight=value),position="dodge") + labs(x="",y=expression(beta)) + scale_fill_discrete(name="method")
 
+
 # fix the x-axis labels
-cmd2 <- paste("coef.comparison.plot <- coef.comparison.plot + scale_x_discrete(labels=c(",
+cmd2 <- paste("coef.comparison.plot <- coef.comparison.plot + scale_x_discrete(limits = coef.comparison$covariate, labels=c(",
       paste("\"",ridge.indv.study.df$X1,"\" = ",llply(ridge.indv.study.df$X1,.fun=function(cov){parse(text=cov)}),sep="",collapse=",")
       ,"))",sep="")
 eval(parse(text=cmd2))
 show(coef.comparison.plot)
 
-### check out bias, variance, and MSE as functions of lambda
-melted.df <- melt(data=ridge.stats,id.vars=c("stat","lambda")); head(melted.df)
-### dig through this lapply to figure out what's up.
-lapply(X=1:J,FUN=function(i){
-  ### double check that this is returning the min.
-  coef <- paste("beta[",i,"]",sep="")
-  relev.subset <- subset(x=melted.df,subset={variable==coef})
-  lambda.min <- with(data=subset(x=relev.subset,subset={stat=="MSE"}),expr={
-    lambda.values[which.min(value)]
-  })
-  ### calculate beta.ridge corresponding to lambda.min
-  beta.ridge <- .calculateRidgeCoefs(X=learning.set[,1:J],Y=learning.set[,J+1],lambda=lambda.min)[i]
-  plot.title <- substitute(atop(paste("bias, variance, and MSE for ", hat(beta)[i]), paste("minimal MSE at ", group("(",list(lambda,hat(beta)[i]),")") == group("(",list(lambda.min,beta.ridge),")"))),list(i=i,lambda.min=lambda.min,beta.ridge=beta.ridge))
-  
-  output <- ggplot(data=relev.subset,aes(x=lambda,y=value,group=stat:variable,lty=stat)) + geom_line() + geom_vline(xintercept=lambda.min,color='red') + labs(x=expression(lambda),y="",title=plot.title)
+### check out bias, variance, and MSE for each coefficient as functions of lambda
+melted.ridge.stats <- melt(data=ridge.stats,id.vars=c("stat","lambda"))
+coef.plots <- dlply(.data=melted.ridge.stats,.variables=.(variable),.fun=function(subset){
+  ### subset has the viz data, minima has the annotation meta-data
+  minima <- subset(ridge.indv.study.df, {X1 == subset$variable[1]})
+  i <- as.numeric(gsub(pattern="X\\[([1]{0,1}[0-9])\\]",replacement="\\1",x=minima$X1))
+  plot.title <- substitute(paste("Minimal MSE = ", MSE, " at ", lambda, " = ", lambda.val, " with ", hat(beta)[i], " = ", beta.val),list(MSE=round(minima$MSE,4), lambda.val=minima$lambda, i=i, beta.val=round(minima$coef,3)))
+  output <- ggplot() + geom_vline(xintercept=minima$lambda,color='black',lty=3,alpha=0.65) + geom_hline(yintercept=minima$MSE,color='black',lty=3,alpha=0.65) + geom_line(data=subset,aes(x=lambda,y=value,group=stat:variable,color=stat))  + geom_point(data=minima,aes(x=lambda,y=MSE),shape=4,color='red',size=2) + labs(y="",x=expression(lambda), title=plot.title)
   show(output)
-  return(list(plot=output,lambda.min=lambda.min,beta.ridge=beta.ridge))
+  return(output)
 })
 
-ggplot(data=melted.df,aes(x=lambda,y=value,color=variable)) + geom_line(aes(group=stat:variable,lty=stat),show_guide=T) #+ facet_wrap(facets=~variable,nrow=4)#,labeller=label_parsed) 
+### investigate properties of LASSO via bootstrap
+###   fix learning set, redraw Y
+B <- 100 # number of redraws
+X.fixed <- learning.set[,1:J]
+
+lasso.sampling.dist <- ldply(.data=1:B,.fun=function(i){
+  ### remake learning set, and run glmnet
+  learning.set[,J+1] <- rnorm(n=n.learning.set, mean=X.fixed %*% beta, sd=sigma)
+  out <- .makeAndAnalyzeGlmnet(learning.set, training.set, regularization="lasso")$data.frame
+  return(out)
+})
+
+### this is doing some fucked up shit. Need to make sure lambda is cast as numeric
+lasso.sampling.dist$lambda <- as.numeric(as.character(lasso.sampling.dist$lambda))
+### for each covariate, find the average coefficient estimate, as well as 
+### bias, variance, and MSE
+lasso.analysis.coef.stats <- daply(.data=lasso.sampling.dist,.variables=.(lambda),.fun=function(subset){  
+  covariates <- subset[,4:13]
+  exp.val <- colMeans(covariates) # 4:13 are coefs
+  bias <- exp.val - beta
+  var.hat <- aaply(.data=covariates,.margins=2,.fun='var')
+  mse.hat <- bias^2 + var.hat
+  return(rbind(exp.val[1:10],bias,var.hat,mse.hat))
+})
+### for each covariate, find lambda which corresponds to minimal MSE
+lasso.analysis.optimal.coefs <- adply(.data=lasso.analysis.coef.stats,.margins=3,.fun=function(covariate){
+  min.lambda.indx <- which.min(covariate[,4])
+  return(c(covariate[min.lambda.indx,],lambda=lambda.values[min.lambda.indx]))
+})
+### make plots similar to before
+lasso.plots <- llply(.data=dimnames(lasso.analysis.coef.stats)[[3]],.fun=function(covariate){
+  ### melted.df has the viz data, minima has the annotation meta-data
+  minima <- subset(lasso.analysis.optimal.coefs, {X1 == covariate})
+  i <- as.numeric(gsub(pattern="X\\[([1]{0,1}[0-9])\\]",replacement="\\1",x=minima$X1))
+  plot.title <- substitute(paste("Minimal MSE = ", MSE, " at ", lambda, " = ", lambda.val, " with ", hat(beta)[i], " = ", beta.val),list(MSE=round(minima$mse.hat,4), lambda.val=minima$lambda, i=i, beta.val=round(minima$V1,3)))
+  
+  df <- data.frame(lasso.analysis.coef.stats[,,covariate],lambda=lambda.values)
+  # reshape data
+  colnames(df)[1] <- "coefficient"
+  melted.df <- melt(df,id.vars="lambda")
+  stat.plot <- ggplot() + geom_vline(xintercept=minima$lambda,color='black',lty=3,alpha=0.65) + geom_hline(yintercept=minima$mse.hat,color='black',lty=3,alpha=0.65) + geom_point(data=minima,aes(x=lambda,y=mse.hat),shape=4,color='red',size=2) + geom_line(data=subset(melted.df,{variable != "coefficient"}), aes(x=lambda,y=value,color=variable)) + labs(y="",x=expression(lambda),title=plot.title) + scale_color_discrete(name="Statistic",breaks=c("bias","var.hat","mse.hat"),labels=c("Bias","Var","MSE"))
+  show(stat.plot)
+  return(stat.plot)
+})
+
+### make bar plot depicting optimal coefficients versus truth
+coef.df <- data.frame(lasso.analysis.optimal.coefs,truth=beta)
+melted.df<-melt(coef.df,id=c("X1","lambda"))
+
+lasso.comparison.plot <- ggplot(data=subset(melted.df,{variable %in% c("V1","truth")}), aes(x=X1,weight=value,fill=variable)) + geom_bar(position="dodge") + scale_fill_discrete(name="",breaks=c("V1","truth"),labels=c(expression(hat(beta)),expression(beta[0]))) + labs(x="", y=expression(beta),title="Optimal LASSO estimates next to true parameter values")
+
+# fix the x-axis labels
+cmd2 <- paste("lasso.comparison.plot <- lasso.comparison.plot + scale_x_discrete(limits = lasso.analysis.optimal.coefs$X1, labels=c(",
+              paste("\"",lasso.analysis.optimal.coefs$X1,"\" = ",llply(as.character(lasso.analysis.optimal.coefs$X1),.fun=function(cov){parse(text=cov)}),sep="",collapse=",")
+              ,"))",sep="")
+eval(parse(text=cmd2))
+show(lasso.comparison.plot)
+
+
+
+####################33
+test <- lasso.analysis.coef.stats[,,7]
+colnames(test)[1] <- "coefficient"
+melted.df <- melt(test);head(melted.df)
+ggplot() + geom_line(data=melted.df, aes(x=lambda,y=value,color=variable)) + scale_color_discrete(name="Statistic",breaks=c("bias","var.hat","mse.hat"),labels=c("Bias","Var","MSE"))
+
+lapply(X=lambda.values,FUN=function(lambda.val){
+  length(which(as.character(lasso.sampling.dist$lambda) == 91))
+  relev.subset <- subset(x=lasso.sampling.dist,subset={lambda==lambda.val})
+  print(relev.subset$lambda[1])
+  print(dim(relev.subset))
+})
+
+checkit <- subset(lasso.sampling.dist,lambda==2)
 
 ### -------------------
 ### code hell
