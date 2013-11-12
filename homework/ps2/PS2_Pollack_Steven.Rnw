@@ -219,6 +219,8 @@ set.seed(1234)
 library(MASS) # for multivariate normal random variables
 library(glmnet) # for regression routines
 library(ggplot2) # for plotting
+library(GGally) # ggplot2 equiv of pairs
+library(grid)
 library(reshape2)
 library(plyr)
 library(xtable)
@@ -357,12 +359,85 @@ training.set <- .generateDataSet(n.training.set,J,rho)
 @
 
 <<prob3aEDA>>=
-library(GGally) # ggplot2 equiv of pairs
-pairs.plot <- ggpairs(data.frame(learning.set[,1:J]),upper=list(continuous=cor),alpha=0.5)
+pairs.plot <- ggpairs(data.frame(learning.set[,1:J]),upper=list(continuous='cor'),alpha=0.5)
 @
 
 <<prob3aPairPlot,out.width="0.85\\textwidth",fig.align='center',fig.cap="Paired scatterplot for learning set covariates.",dev='pdf'>>=
 show(pairs.plot)
+@
+
+Compare upper diagonals of figure (\ref{fig:prob3aPairPlot}) and equation (\ref{eq:simCov}) to see how well sample and theoretical correlations line up.
+<<studyCov,results='asis'>>=
+sim.cov <- xtable(cov2cor(.ar1CovMatrix(J,rho)),align=rep("",J+1),
+                  digits=4,
+                  label="eq:simCov")
+print(sim.cov,tabular.environment="pmatrix",include.rownames=F,include.colnames=F,hline.after=NULL,latex.environments=c("equation"))
+@
+
+<<prob3aCorPlot,out.width="0.49\\textwidth",fig.align='left',fig.cap="Heatmap for correlation structure of learning set (sample) juxtapose to theoretical correlation structure.",dev='pdf',fig.keep='all', fig.show='hold'>>=
+makeCorrelationPlot <- function(cor.mat,show.guide=T,plot.title="") {
+  require(grid)
+  require(reshape2)
+  melted.cor <- melt(cor.mat)
+  colnames(melted.cor)[1:2] <- c("Var1", "Var2")
+  output <- ggplot(data=melted.cor, aes(x=Var1,y=Var2,fill=value)) + geom_tile() + labs(x="",y="",title=plot.title) + theme_bw() + theme(legend.position="bottom") + theme(legend.key.width=unit(2,"cm")) 
+  
+  output <- if (show.guide) {
+    output + scale_fill_continuous(name="Correlation",limits=c(-1,1),breaks=seq(-1,1,length.out=5))
+  } else {
+    output + scale_fill_continuous(guide = show.guide, name="Correlation",limits=c(-1,1),breaks=seq(-1,1,length.out=5))
+  }
+  
+  # fix the axis labels, variable names are nonsense
+  tmp <- paste("\"",colnames(cor.mat),"\" = ",llply(colnames(cor.mat),.fun=function(cov){parse(text=cov)}),sep="",collapse=",")
+  cmd2 <- paste("output <- output + scale_x_discrete(limits = colnames(cor.mat), labels=c(", tmp, ")) + scale_y_discrete(limits=rev(colnames(cor.mat)), labels=c(", tmp, "))",sep="")
+  eval(parse(text=cmd2))
+  return(output)
+}
+
+cov.X <- .ar1CovMatrix(J,rho); cov.Y <- cov.X %*% beta
+theor.cov.mat <- rbind(cbind(cov.X,cov.Y),c(cov.Y,sigma^2))
+theor.cor.mat <- cov2cor(theor.cov.mat)
+colnames(theor.cor.mat) <- colnames(learning.set)
+theor.cor.plot <- makeCorrelationPlot(theor.cor.mat,T,"Theoretical correlation")
+sample.cor.plot <- makeCorrelationPlot(cor(learning.set),T,"Sample correlation")
+show(sample.cor.plot)
+show(theor.cor.plot)
+@
+
+<<prob3aJointDensity>>=
+require(grid)
+sim.df <- data.frame(rbind(cbind(learning.set,set="learning"),cbind(training.set,set="test")),check.names=F)
+melted.sim.df <- melt(sim.df,id.vars=c("Y","set"))
+melted.sim.df <- transform(melted.sim.df,Y=as.numeric(as.character(Y)),value=as.numeric(as.character(value)))
+joint.density.plots <- ggplot(data=melted.sim.df,aes(y=Y,x=value,group=set:variable)) + geom_point(aes(shape=set),alpha=0.25) + stat_smooth(method="loess",se=F,n=100,aes(color=set)) + facet_wrap(facets=~variable,ncol=5,scales="free_x") + theme(legend.position="bottom") + theme(legend.key.width=unit(2,"cm")) + labs(x=expression(paste("covariate value, ", X[i],sep="")), y=expression(paste("Response, ", Y, sep=""))) + scale_shape_discrete(name="",label=c("learning"="Learning set", "test"="Test set")) + scale_color_discrete(name="", label=c("learning"="Learning set", "test"="Test set"))
+@
+
+<<prob3aJointDensityPlot,out.width="0.85\\textwidth",fig.align='center',fig.cap="Joint density plots of $Y$ against $X_{i}$ with loess applied to both learning and test sets.",dev='pdf',dependson="prob3aJointDensity">>=
+show(joint.density.plots)
+@
+
+<<prob3aBoxPlots,out.width="0.85\\textwidth",fig.align='center',fig.cap="Box plots for learning and test set variables.",dev='pdf',dependson="prob3aJointDensity">>=
+require(grid)
+melted.sim.df <- melt(sim.df, id.vars=c("set"))
+melted.sim.df <- transform(melted.sim.df, value=as.numeric(as.character(value)))
+boxplots <- ggplot(data=melted.sim.df, aes(x=variable,y=value,group=set:variable,color=set)) + geom_boxplot() + scale_color_discrete(name="", label=c("learning"="Learning set", "test"="Test set")) + theme(legend.position="bottom") + theme(legend.key.width=unit(2,"cm")) + labs(x="", y="")
+
+parseAxisLabels <- function(raw.axis.labels, plot.obj, axis="x") {
+  output <- plot.obj
+  label.string <- paste("\"",raw.axis.labels,"\" = ",
+                          llply(raw.axis.labels,.fun=function(tick.mark){parse(text=tick.mark)}),sep="",collapse=",")
+  switch(axis,
+         x = {
+             output.update <- paste("output <- output + scale_x_discrete(limits = raw.axis.labels, labels=c(", label.string, "))",sep="")             
+         },
+         y = {
+              output.update <- paste("output <- output + scale_y_discrete(limits = raw.axis.labels, labels=c(", label.string, "))",sep="")  
+         })
+  eval(parse(text=output.update))
+  return(output)
+}
+parseAxisLabels(levels(melted.sim.df$variable),boxplots)
 @
 
 <<prob3bDataGeneration>>=
