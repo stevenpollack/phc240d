@@ -8,11 +8,11 @@
 \usepackage{inconsolata}
 
 \lhead{PHC240D}
-\chead{Problem Set \#1}
+\chead{Problem Set \#2}
 \rhead{Steven Pollack -- 24112977}
 \cfoot{\thepage}
 
-\title{PHC240D \\ Problem Set \#1}
+\title{PHC240D \\ Problem Set \#2}
 \author{Steven Pollack \\ 24112977}
 \date{}
 
@@ -208,7 +208,7 @@ Again, as with $\beta_{Ridge}$, we see the hyper-parameter $\lambda$ governs the
 
 \paragraph{\#3.}
 \begin{enumerate}
-\item[a)] EDA
+\item[a)]
 <<simulationSetup>>=
 ### question 3 -- simulation study
 
@@ -357,6 +357,11 @@ n.training.set <- 1000 # number of obs in test set
 learning.set <- .generateDataSet(n.learning.set,J,rho)
 training.set <- .generateDataSet(n.training.set,J,rho)
 @
+Given that we are dealing with simulated data, it makes sense to check our data to make sure everything was generated correctly; figure (\ref{fig:prob3aPairPlot}) displays the scatterplots for features $X_{i}$ against $X_{j}$ inside the learning set, and if you use equation (\ref{eq:simCov}) (or figure (\ref{fig:prob3aCorPlot})), there's no reason to believe that anything is out of the ordinary. I.e. our $X_i$'s do seem to be following an AR(1) correlation scheme. 
+
+A quick plotting of response against individual features (in the whole data) -- see figure (\ref{fig:prob3aJointDensityPlot}) -- reveals correlations that seem to transition, through zero, from mildly positive to mildly negative. This is also consistent with our simulation setup.
+
+Finally, a side-by-side boxplot of the marginal distributions (figure (\ref{fig:prob3aBoxPlots})) reveals that, unsurprisingly, everything is only, more-or-less, the same scale with means near zero. This has influenced my decision to column-center, but not standardize the columns of my design matrix.
 
 <<prob3aEDA>>=
 pairs.plot <- ggpairs(data.frame(learning.set[,1:J]),upper=list(continuous='cor'),alpha=0.5)
@@ -366,7 +371,7 @@ pairs.plot <- ggpairs(data.frame(learning.set[,1:J]),upper=list(continuous='cor'
 show(pairs.plot)
 @
 
-Compare upper diagonals of figure (\ref{fig:prob3aPairPlot}) and equation (\ref{eq:simCov}) to see how well sample and theoretical correlations line up.
+
 <<studyCov,results='asis'>>=
 sim.cov <- xtable(cov2cor(.ar1CovMatrix(J,rho)),align=rep("",J+1),
                   digits=4,
