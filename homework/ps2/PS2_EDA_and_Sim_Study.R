@@ -1,3 +1,20 @@
+
+## ----globalParameters,echo=FALSE,cache=FALSE,message=FALSE---------------
+opts_chunk$set(comment="#", cache=T, echo=F, tidy=F, warning=FALSE, message=FALSE, highlight=T, autodep=T)
+library(doMC)
+registerDoMC(cores=detectCores()) # this could break someone's shit.
+
+
+## ----stayInside,echo=FALSE-----------------------------------------------
+  options(width=60)
+  listing <- function(x, options) {
+     paste("\\begin{lstlisting}[basicstyle=\\ttfamily,breaklines=true]\n", x,"\\end{lstlisting}\n", sep = "")
+  }
+  
+  knit_hooks$set(source=listing, output=listing)
+
+
+## ----simulationSetup-----------------------------------------------------
 ### question 3 -- simulation study
 
 ### ------------------------
@@ -7,7 +24,12 @@ set.seed(1234)
 library(MASS) # for multivariate normal random variables
 library(glmnet) # for regression routines
 library(ggplot2) # for plotting
+library(GGally) # ggplot2 equiv of pairs
+library(grid)
 library(reshape2)
+library(plyr)
+library(xtable)
+
 
 ### -----------------------
 ### helper functions
@@ -136,19 +158,93 @@ lambda.values <- 0:250 # domain of hyper-parameter space to optimize over
 n.learning.set <- 100 # number of obs in learning set
 n.training.set <- 1000 # number of obs in test set
 
-
-### ------------------------
-### simulation study
-### ------------------------
-
-### 1) make learning and test set
+### make learning and test set
 learning.set <- .generateDataSet(n.learning.set,J,rho)
 training.set <- .generateDataSet(n.training.set,J,rho)
 
-### 2) perform EDA on learning set
 
-### 3) examine properties of regularization
+## ----prob3aEDA-----------------------------------------------------------
+pairs.plot <- ggpairs(data.frame(learning.set[,1:J]),upper=list(continuous='cor'),alpha=0.5)
 
+
+## ----prob3aPairPlot,out.width="0.85\\textwidth",fig.align='center',fig.cap="Paired scatterplot for learning set covariates.",dev='pdf'----
+show(pairs.plot)
+
+
+## ----studyCov,results='asis'---------------------------------------------
+sim.cov <- xtable(cov2cor(.ar1CovMatrix(J,rho)),align=rep("",J+1),
+                  digits=4,
+                  label="eq:simCov")
+print(sim.cov,tabular.environment="pmatrix",include.rownames=F,include.colnames=F,hline.after=NULL,latex.environments=c("equation"))
+
+
+## ----prob3aCorPlot,out.width="0.49\\textwidth",fig.align='left',fig.cap="Heatmap for correlation structure of learning set (sample) juxtapose to theoretical correlation structure.",dev='pdf',fig.keep='all', fig.show='hold'----
+makeCorrelationPlot <- function(cor.mat,show.guide=T,plot.title="") {
+  require(grid)
+  require(reshape2)
+  melted.cor <- melt(cor.mat)
+  colnames(melted.cor)[1:2] <- c("Var1", "Var2")
+  output <- ggplot(data=melted.cor, aes(x=Var1,y=Var2,fill=value)) + geom_tile() + labs(x="",y="",title=plot.title) + theme_bw() + theme(legend.position="bottom") + theme(legend.key.width=unit(2,"cm")) 
+  
+  output <- if (show.guide) {
+    output + scale_fill_continuous(name="Correlation",limits=c(-1,1),breaks=seq(-1,1,length.out=5))
+  } else {
+    output + scale_fill_continuous(guide = show.guide, name="Correlation",limits=c(-1,1),breaks=seq(-1,1,length.out=5))
+  }
+  
+  # fix the axis labels, variable names are nonsense
+  tmp <- paste("\"",colnames(cor.mat),"\" = ",llply(colnames(cor.mat),.fun=function(cov){parse(text=cov)}),sep="",collapse=",")
+  cmd2 <- paste("output <- output + scale_x_discrete(limits = colnames(cor.mat), labels=c(", tmp, ")) + scale_y_discrete(limits=rev(colnames(cor.mat)), labels=c(", tmp, "))",sep="")
+  eval(parse(text=cmd2))
+  return(output)
+}
+
+cov.X <- .ar1CovMatrix(J,rho); cov.Y <- cov.X %*% beta
+theor.cov.mat <- rbind(cbind(cov.X,cov.Y),c(cov.Y,sigma^2))
+theor.cor.mat <- cov2cor(theor.cov.mat)
+colnames(theor.cor.mat) <- colnames(learning.set)
+theor.cor.plot <- makeCorrelationPlot(theor.cor.mat,T,"Theoretical correlation")
+sample.cor.plot <- makeCorrelationPlot(cor(learning.set),T,"Sample correlation")
+show(sample.cor.plot)
+show(theor.cor.plot)
+
+
+## ----prob3aJointDensity--------------------------------------------------
+require(grid)
+sim.df <- data.frame(rbind(cbind(learning.set,set="learning"),cbind(training.set,set="test")),check.names=F)
+melted.sim.df <- melt(sim.df,id.vars=c("Y","set"))
+melted.sim.df <- transform(melted.sim.df,Y=as.numeric(as.character(Y)),value=as.numeric(as.character(value)))
+joint.density.plots <- ggplot(data=melted.sim.df,aes(y=Y,x=value,group=set:variable)) + geom_point(aes(shape=set),alpha=0.25) + stat_smooth(method="loess",se=F,n=100,aes(color=set)) + facet_wrap(facets=~variable,ncol=5,scales="free_x") + theme(legend.position="bottom") + theme(legend.key.width=unit(2,"cm")) + labs(x=expression(paste("covariate value, ", X[i],sep="")), y=expression(paste("Response, ", Y, sep=""))) + scale_shape_discrete(name="",label=c("learning"="Learning set", "test"="Test set")) + scale_color_discrete(name="", label=c("learning"="Learning set", "test"="Test set"))
+
+
+## ----prob3aJointDensityPlot,out.width="0.85\\textwidth",fig.align='center',fig.cap="Joint density plots of $Y$ against $X_{i}$ with loess applied to both learning and test sets.",dev='pdf',dependson="prob3aJointDensity"----
+show(joint.density.plots)
+
+
+## ----prob3aBoxPlots,out.width="0.85\\textwidth",fig.align='center',fig.cap="Box plots for learning and test set variables.",dev='pdf',dependson="prob3aJointDensity"----
+require(grid)
+melted.sim.df <- melt(sim.df, id.vars=c("set"))
+melted.sim.df <- transform(melted.sim.df, value=as.numeric(as.character(value)))
+boxplots <- ggplot(data=melted.sim.df, aes(x=variable,y=value,group=set:variable,color=set)) + geom_boxplot() + scale_color_discrete(name="", label=c("learning"="Learning set", "test"="Test set")) + theme(legend.position="bottom") + theme(legend.key.width=unit(2,"cm")) + labs(x="", y="")
+
+parseAxisLabels <- function(raw.axis.labels, plot.obj, axis="x") {
+  output <- plot.obj
+  label.string <- paste("\"",raw.axis.labels,"\" = ",
+                          llply(raw.axis.labels,.fun=function(tick.mark){parse(text=tick.mark)}),sep="",collapse=",")
+  switch(axis,
+         x = {
+             output.update <- paste("output <- output + scale_x_discrete(limits = raw.axis.labels, labels=c(", label.string, "))",sep="")             
+         },
+         y = {
+              output.update <- paste("output <- output + scale_y_discrete(limits = raw.axis.labels, labels=c(", label.string, "))",sep="")  
+         })
+  eval(parse(text=output.update))
+  return(output)
+}
+parseAxisLabels(levels(melted.sim.df$variable),boxplots)
+
+
+## ----prob3bDataGeneration------------------------------------------------
 ### make coefficients for each regularization scheme
 ridge.study <- .makeAndAnalyzeGlmnet(learning.set, training.set)
 ridge.study.df <- ridge.study$data.frame
@@ -167,34 +263,65 @@ lasso.t.MSE.min.indx <- which.min(lasso.study.df$training.set.MSE)
 
 location.of.MSE.mins <- rbind(ridge.study.df[ridge.t.MSE.min.indx,],enet.study.df[enet.t.MSE.min.indx,],lasso.study.df[lasso.t.MSE.min.indx,])
 
+
+## ----prob3b-cPlots-------------------------------------------------------
 ### reshape data for visualization
 combined.df <- rbind(ridge.study.df,enet.study.df,lasso.study.df)
-melted.df <- melt(data=combined.df,id.vars=c("lambda","df","regularization")); head(melted.df)
+melted.df <- melt(data=combined.df,id.vars=c("lambda","df","regularization"))
 mse.indx <- which(melted.df$variable %in% c("learning.set.MSE","training.set.MSE"))
 
-### look at MSE vs. lambda for training and learning sets
 mse.vs.lambda <- ggplot(data=melted.df[mse.indx,],aes(x=lambda,y=value,color=regularization,lty=variable)) + geom_line() + geom_vline(data=location.of.MSE.mins,aes(xintercept=lambda,color=regularization),lty=8,alpha=0.75) + labs(x=expression(lambda),y="MSE")
-show(mse.vs.lambda)
 
 ### look at how coefficients vary with lambda
 beta.vs.lambda <- ggplot(data=melted.df[-mse.indx,],aes(x=lambda,y=value,color=variable)) + geom_line(show_guide=F) + geom_hline(yintercept=beta,alpha=0.5,lty=3) +  geom_vline(data=location.of.MSE.mins,aes(xintercept=lambda),lty=8,alpha=0.5) + geom_text(data=subset(x=melted.df[-mse.indx,],subset={lambda==0}),aes(label=variable,x=0,y=value,color=variable,group=regularization),show_guide=F,hjust=1,parse=T) + facet_grid(regularization~.) + labs(x=expression(lambda),y=expression(beta))
-show(beta.vs.lambda)
 
 ### compare "optimal" coefficients between all 4 methods
 beta.OLS <- .calcOLSCoefs(X=learning.set[,1:J],Y=learning.set[,J+1])
 extra.info <- rbind(data.frame(regularization="OLS",lambda=0,df=J,t(beta.OLS),learning.set.MSE=0,training.set.MSE=0,check.names=F),location.of.MSE.mins)
 
 coefs.vs.method <- ggplot(data=melt(extra.info[,-(14:15)],id.vars=c("lambda","df","regularization")),aes(x=regularization,y=value,color=variable,group=variable)) + geom_point(show_guide=F) + geom_line(show_guide=F) + geom_hline(yintercept=beta,alpha=0.5,lty=3) + geom_text(data=melt(extra.info[1,-(14:15)],id.vars=c("lambda","df","regularization")),aes(label=variable,x=as.factor("OLS"),y=value),hjust=1.25,vjust=0,show_guide=F,parse=T) + labs(x="method",y=expression(beta))
-show(coefs.vs.method)
 
 ### look at beta vs. df
 beta.vs.df <- ggplot(data=melted.df[-mse.indx,],aes(x=df,y=value,color=variable)) + geom_line(show_guide=F) + geom_point(data=melt(location.of.MSE.mins[,-(14:15)],id.vars=c("lambda","df","regularization")),aes(x=df,y=value),size=3,shape=2,show_guide=F) + geom_text(data=subset(x=melted.df[-mse.indx,],subset={df==10 & lambda==0}),aes(label=variable,x=10,y=value,color=variable,group=regularization),show_guide=F,hjust=-.05,parse=T) +  facet_grid(regularization~.) + labs(x="Effective Degrees of Freedom",y=expression(beta))
-show(beta.vs.df)
 
 ### check out df vs. lambda
-df.vs.lambda <- ggplot(data=melted.df[-mse.indx,],aes(x=lambda,y=df,color=regularization)) + geom_line() + geom_vline(data=location.of.MSE.mins,aes(xintercept=lambda,color=regularization),lty=8,alpha=0.75)  + labs(x=expression(lambda),y="Effective Degrees of Freedom",title=expression(X[i]))
+df.vs.lambda <- ggplot(data=melted.df[-mse.indx,],aes(x=lambda,y=df,color=regularization)) + geom_line() + geom_vline(data=location.of.MSE.mins,aes(xintercept=lambda,color=regularization),lty=8,alpha=0.75)  + labs(x=expression(lambda),y="Effective Degrees of Freedom")
+
+
+## ----prob3plot5,out.width='0.85\\textwidth',dev='pdf',fig.align='center',fig.cap="Effective degrees of Freedom against $\\lambda$. Vertical lines indicate location of $\\lambda$ which minimize test set MSE."----
 show(df.vs.lambda)
 
+
+## ----prob3plot2,out.width='0.85\\textwidth',dev='pdf',fig.align='center',fig.cap="Behavior of coefficient estimates across $\\lambda$ for each method. Horizontal lines indicate true coefficient values, and vertical lines indicate $\\lambda$ which minimze test set MSE."----
+show(beta.vs.lambda)
+
+
+## ----prob3plot1,out.width='0.85\\textwidth',dev='pdf',fig.align='center',fig.cap="MSE vs. $\\lambda$ for training and learning sets. Vertical lines indicate location of minima."----
+### look at MSE vs. lambda for training and learning sets
+show(mse.vs.lambda)
+
+
+## ----prob3plot3,out.width='0.85\\textwidth',dev='pdf',fig.align='center',fig.cap="Optimal coefficient estimates for each method. Horizontal lines indicate true coefficient values."----
+show(coefs.vs.method)
+
+
+## ----prob3plot4,out.width='0.85\\textwidth',dev='pdf',fig.align='center',fig.cap="Value of coefficients against Effective degrees of Freedom. Triangle points indicate optimal coefficient values."----
+
+show(beta.vs.df)
+
+
+## ----demo,eval=FALSE,echo=TRUE,tidy=TRUE,highlight=TRUE------------------
+## ### coefs.MSE.df is a length(lambda) x J data.frame
+## ### coefs.MSE.df[i,j] has the MSE for the j-th
+## ### coefficient estimate at lambda[i]
+## min.MSE.indices <- apply(coefs.MSE.df, MARGIN=2, 'which.min')
+## ### coefs.df is a length(lambda) x J data.frame
+## ### coefs.df[i,j] has the j-th coef estimate at
+## ### lambda[i]
+## aggregated.estimator <- coefs.df[cbind(min.MSE.indices,1:J)]
+
+
+## ----prob3dplots---------------------------------------------------------
 ### investigate properties of Ridge estimator;
 # For the simulation model of a), provide and comment on graphical displays of
 # the bias, variance, and MSE of the ridge estimators based on the learning set.
@@ -202,7 +329,6 @@ show(df.vs.lambda)
 # the MSE and the corresponding estimate.
 
 ### use closed form expression to investigate bias, variance, and MSE of beta_ridge
-library(plyr)
 ridge.sampling.stats.list.mat <- .calculateRidgeMSE(learning.set[,1:J],lambda.values,beta,sigma)
 ridge.stats <- adply(.data=ridge.sampling.stats.list.mat, .margins=1,
                      .fun=function(row){cbind(lambda=lambda.values,ldply(.data=row, .fun='t'))}
@@ -224,24 +350,22 @@ frank.MSE.lset <- mean( (learning.set[,J+1] - learning.set[,1:J] %*% ridge.indv.
 frank.MSE.tset <- mean( (training.set[,J+1] - training.set[,1:J] %*% ridge.indv.study.df$coef)^2 )
 
 ### compare this to minimum MSE found above
-library(xtable)
 mse.comparison <- rbind(c(Learning=frank.MSE.lset,Test=frank.MSE.tset),c(Learning=location.of.MSE.mins$learning.set.MSE[1],Test=location.of.MSE.mins$training.set.MSE[1]))
 mse.comparison <- data.frame(method=c("aggregated","argmin"),mse.comparison)
+
 mse.comparison.plot <- ggplot(data=melt(mse.comparison),aes(x=method)) + geom_bar(aes(weight=value,fill=variable),position="dodge") + geom_text(aes(x=method,y=value,label=round(value,digits=3)),hjust=c(1.5,-0.5,1.5,-0.5),vjust=-0.2,color='black',position="dodge") + labs(y="MSE") + scale_fill_discrete(name="")
-show(mse.comparison.plot)
 
 ### compare frankenstein coefficients to argmin coefs
-coef.comparison <- data.frame(ridge.indv.study.df[,1:2],t(location.of.MSE.mins[1,4:13]))
-colnames(coef.comparison) <- c("covariate","aggregated","argmin")
-coef.comparison.plot <- ggplot(data=melt(coef.comparison),aes(x=covariate,fill=variable)) + geom_bar(aes(weight=value),position="dodge") + labs(x="",y=expression(beta)) + scale_fill_discrete(name="method")
+coef.comparison <- data.frame(ridge.indv.study.df[,1:2],t(location.of.MSE.mins[1,4:13]),beta)
+colnames(coef.comparison) <- c("covariate","aggregated","argmin","truth")
 
+coef.comparison.plot <- ggplot(data=melt(coef.comparison),aes(x=covariate,fill=variable)) + geom_bar(aes(weight=value),position="dodge",show_guide=F) + labs(x="",y=expression(beta)) + scale_fill_discrete(name="method")
 
 # fix the x-axis labels
 cmd2 <- paste("coef.comparison.plot <- coef.comparison.plot + scale_x_discrete(limits = coef.comparison$covariate, labels=c(",
       paste("\"",ridge.indv.study.df$X1,"\" = ",llply(ridge.indv.study.df$X1,.fun=function(cov){parse(text=cov)}),sep="",collapse=",")
       ,"))",sep="")
 eval(parse(text=cmd2))
-show(coef.comparison.plot)
 
 ### check out bias, variance, and MSE for each coefficient as functions of lambda
 melted.ridge.stats <- melt(data=ridge.stats,id.vars=c("stat","lambda"))
@@ -250,23 +374,60 @@ coef.plots <- dlply(.data=melted.ridge.stats,.variables=.(variable),.fun=functio
   minima <- subset(ridge.indv.study.df, {X1 == subset$variable[1]})
   i <- as.numeric(gsub(pattern="X\\[([1]{0,1}[0-9])\\]",replacement="\\1",x=minima$X1))
   plot.title <- substitute(paste("Minimal MSE = ", MSE, " at ", lambda, " = ", lambda.val, " with ", hat(beta)[i], " = ", beta.val),list(MSE=round(minima$MSE,4), lambda.val=minima$lambda, i=i, beta.val=round(minima$coef,3)))
-  output <- ggplot() + geom_vline(xintercept=minima$lambda,color='black',lty=3,alpha=0.65) + geom_hline(yintercept=minima$MSE,color='black',lty=3,alpha=0.65) + geom_line(data=subset,aes(x=lambda,y=value,group=stat:variable,color=stat))  + geom_point(data=minima,aes(x=lambda,y=MSE),shape=4,color='red',size=2) + labs(y="",x=expression(lambda), title=plot.title)
-  show(output)
+  output <- ggplot() + geom_vline(xintercept=minima$lambda,color='black',lty=3,alpha=0.65) + geom_hline(yintercept=minima$MSE,color='black',lty=3,alpha=0.65) + geom_line(data=subset,aes(x=lambda,y=value,group=stat:variable,color=stat),show_guide=F)  + geom_point(data=minima,aes(x=lambda,y=MSE),shape=4,color='red',size=2) + labs(y="",x=expression(lambda), title=plot.title)
+#   show(output)
   return(output)
 })
 
+
+## ----optimalCoefsOut,tidy=TRUE,results='asis'----------------------------
+convert.to.tex <- function(str){gsub(pattern="X\\[([01]{0,1}[0-9]{1})\\]",replacement="$X_{\\1}$",x=str)}
+tbl.out <- xtable(ridge.indv.study.df, align="lcccc",
+                  label="tab:ridgeOptimal",
+                  caption="Locally optimal (ridge) coefficient estimates.")
+colnames(tbl.out) <- c("Covariate", "Est. Coef.", "$\\lambda$", "MSE")
+digits(tbl.out) <- c(0,0,4,0,4)
+print(tbl.out, latex.environments=c("center"),
+      sanitize.text.function=convert.to.tex,
+      floating=T,
+      include.rownames=F)
+
+
+## ----prob3plot7,out.width='0.85\\textwidth',dev='pdf',fig.align='center',fig.cap="Coefficient comparison for ``aggregated'' (red) and $\\argmin$ (green) estimators, next to true coefficient values (blue)."----
+show(coef.comparison.plot)
+
+
+## ----prob3plot6,out.width='0.5\\textwidth',dev='pdf',fig.align='center',fig.cap="MSE comparison for ``aggregated'' and $\\argmin$ estimators"----
+show(mse.comparison.plot)
+
+
+## ----prob3plot8,out.width='0.3\\textwidth',dev='pdf',fig.align='left',fig.cap="Bias (red), Variance (green), and MSE (blue) for each ridge coefficient estimate. Dashed lines indicate location and value of MSE's minimum.",fig.show='hold',fig.keep='all'----
+l_ply(.data=coef.plots,.fun='show')
+
+
+## ----prob3eDataGen-------------------------------------------------------
 ### investigate properties of LASSO via bootstrap
 ###   fix learning set, redraw Y
-B <- 100 # number of redraws
+B <- 1000 # number of redraws
 X.fixed <- learning.set[,1:J]
 
-lasso.sampling.dist <- ldply(.data=1:B,.fun=function(i){
+p.time2 <- system.time(lasso.sampling.dist <- ldply(.inform=F,.parallel=T,.data=1:B,.fun=function(i){
   ### remake learning set, and run glmnet
   learning.set[,J+1] <- rnorm(n=n.learning.set, mean=X.fixed %*% beta, sd=sigma)
   out <- .makeAndAnalyzeGlmnet(learning.set, training.set, regularization="lasso")$data.frame
   return(out)
-})
+}))
 
+
+## ----eval=FALSE,echo=TRUE,tidy=TRUE,highlight=TRUE-----------------------
+## Y.star <- rnorm(n=n.learning.set, mean = X.n %*% beta, sd = sigma*diag(n.learning.set) )
+
+
+## ----timeOut,eval=FALSE--------------------------------------------------
+## p.time2
+
+
+## ----prob3eDataProcessing,dependson="prob3eDataGen"----------------------
 ### this is doing some fucked up shit. Need to make sure lambda is cast as numeric
 lasso.sampling.dist$lambda <- as.numeric(as.character(lasso.sampling.dist$lambda))
 ### for each covariate, find the average coefficient estimate, as well as 
@@ -284,6 +445,33 @@ lasso.analysis.optimal.coefs <- adply(.data=lasso.analysis.coef.stats,.margins=3
   min.lambda.indx <- which.min(covariate[,4])
   return(c(covariate[min.lambda.indx,],lambda=lambda.values[min.lambda.indx]))
 })
+
+### make bar plot depicting optimal coefficients versus truth
+coef.df <- data.frame(lasso.analysis.optimal.coefs,truth=beta)
+melted.df<-melt(coef.df,id=c("X1","lambda"))
+
+lasso.comparison.plot <- ggplot(data=subset(melted.df,{variable %in% c("V1","truth")}), aes(x=X1,weight=value,fill=variable)) + geom_bar(position="dodge",show_guide=F) + scale_fill_discrete(name="",breaks=c("V1","truth"),labels=c(expression(hat(beta)),expression(beta[0]))) + labs(x="", y=expression(beta))
+
+# fix the x-axis labels
+cmd2 <- paste("lasso.comparison.plot <- lasso.comparison.plot + scale_x_discrete(limits = lasso.analysis.optimal.coefs$X1, labels=c(",
+              paste("\"",lasso.analysis.optimal.coefs$X1,"\" = ",llply(as.character(lasso.analysis.optimal.coefs$X1),.fun=function(cov){parse(text=cov)}),sep="",collapse=",")
+              ,"))",sep="")
+eval(parse(text=cmd2))
+
+
+## ----optimalCoefsOut2,echo=FALSE,tidy=TRUE,results='asis'----------------
+tbl2.out <- xtable(lasso.analysis.optimal.coefs, align="lcccccc",
+                  label="tab:lassoOptimal",
+                  caption="Locally optimal (LASSO) coefficient estimates.")
+colnames(tbl2.out) <- c("Covariate", "$\\hat{\\beta}_{i}$", "$\\hat{\\text{bias}}$", "$\\widehat{\\sigma}^2$", "$\\hat{\\text{MSE}}$", "$\\lambda$")
+digits(tbl2.out) <- c(0,0,4,4,4,4,0)
+print(tbl2.out, latex.environments=c("center"),
+      sanitize.text.function=convert.to.tex,
+      floating=T,
+      include.rownames=F)
+
+
+## ----prob3plot9,out.width='0.3\\textwidth',dev='pdf',fig.align='left',fig.cap="Bias (red), Variance (green), and MSE (blue) for each LASSO coefficient estimate. Dashed lines indicate location and value of MSE's minimum.",fig.show='hold',fig.keep='all'----
 ### make plots similar to before
 lasso.plots <- llply(.data=dimnames(lasso.analysis.coef.stats)[[3]],.fun=function(covariate){
   ### melted.df has the viz data, minima has the annotation meta-data
@@ -295,95 +483,13 @@ lasso.plots <- llply(.data=dimnames(lasso.analysis.coef.stats)[[3]],.fun=functio
   # reshape data
   colnames(df)[1] <- "coefficient"
   melted.df <- melt(df,id.vars="lambda")
-  stat.plot <- ggplot() + geom_vline(xintercept=minima$lambda,color='black',lty=3,alpha=0.65) + geom_hline(yintercept=minima$mse.hat,color='black',lty=3,alpha=0.65) + geom_point(data=minima,aes(x=lambda,y=mse.hat),shape=4,color='red',size=2) + geom_line(data=subset(melted.df,{variable != "coefficient"}), aes(x=lambda,y=value,color=variable)) + labs(y="",x=expression(lambda),title=plot.title) + scale_color_discrete(name="Statistic",breaks=c("bias","var.hat","mse.hat"),labels=c("Bias","Var","MSE"))
+  stat.plot <- ggplot() + geom_vline(xintercept=minima$lambda,color='black',lty=3,alpha=0.65) + geom_hline(yintercept=minima$mse.hat,color='black',lty=3,alpha=0.65) + geom_point(data=minima,aes(x=lambda,y=mse.hat),shape=4,color='red',size=2) + geom_line(data=subset(melted.df,{variable != "coefficient"}), aes(x=lambda,y=value,color=variable), show_guide=F) + labs(y="",x=expression(lambda),title=plot.title) 
   show(stat.plot)
   return(stat.plot)
 })
 
-### make bar plot depicting optimal coefficients versus truth
-coef.df <- data.frame(lasso.analysis.optimal.coefs,truth=beta)
-melted.df<-melt(coef.df,id=c("X1","lambda"))
 
-lasso.comparison.plot <- ggplot(data=subset(melted.df,{variable %in% c("V1","truth")}), aes(x=X1,weight=value,fill=variable)) + geom_bar(position="dodge") + scale_fill_discrete(name="",breaks=c("V1","truth"),labels=c(expression(hat(beta)),expression(beta[0]))) + labs(x="", y=expression(beta),title="Optimal LASSO estimates next to true parameter values")
-
-# fix the x-axis labels
-cmd2 <- paste("lasso.comparison.plot <- lasso.comparison.plot + scale_x_discrete(limits = lasso.analysis.optimal.coefs$X1, labels=c(",
-              paste("\"",lasso.analysis.optimal.coefs$X1,"\" = ",llply(as.character(lasso.analysis.optimal.coefs$X1),.fun=function(cov){parse(text=cov)}),sep="",collapse=",")
-              ,"))",sep="")
-eval(parse(text=cmd2))
+## ----prob3plot10,out.width='0.75\\textwidth',dev='pdf',fig.align='center',fig.cap="Optimal LASSO estimates (red) next to true parameter values (green)."----
 show(lasso.comparison.plot)
 
 
-
-####################33
-test <- lasso.analysis.coef.stats[,,7]
-colnames(test)[1] <- "coefficient"
-melted.df <- melt(test);head(melted.df)
-ggplot() + geom_line(data=melted.df, aes(x=lambda,y=value,color=variable)) + scale_color_discrete(name="Statistic",breaks=c("bias","var.hat","mse.hat"),labels=c("Bias","Var","MSE"))
-
-lapply(X=lambda.values,FUN=function(lambda.val){
-  length(which(as.character(lasso.sampling.dist$lambda) == 91))
-  relev.subset <- subset(x=lasso.sampling.dist,subset={lambda==lambda.val})
-  print(relev.subset$lambda[1])
-  print(dim(relev.subset))
-})
-
-checkit <- subset(lasso.sampling.dist,lambda==2)
-
-### -------------------
-### code hell
-### -------------------
-
-# ridge.sampling.stats <- lapply(X=1:dim(ridge.sampling.stats.list.mat)[1],FUN=function(row.i){
-#   row <- ridge.sampling.stats.list.mat[row.i,]
-#   stat.name <- rownames(ridge.sampling.stats.list.mat)[row.i]
-#   mat <- matrix(unlist(row),ncol=J,byrow=T,dimnames=list(lambda.values,paste("beta[",1:J,"]",sep="")))
-#   return(data.frame(stat=stat.name,lambda=lambda.values,mat,check.names=F))
-# })
-# ridge.bias.df <- ridge.sampling.stats[[1]]
-# ridge.var.df <- ridge.sampling.stats[[2]]
-# ridge.mse.df <- ridge.sampling.stats[[3]]
-.makePlots <- function(glmnet.df,display.plots=F) {
-  
-  ### melt down for visualization; exclude MSE's
-  viz.data1 <- melt(data=glmnet.df[,-c(J+4,J+5)],id.vars=c("regularization","lambda","df"))
-  
-  ### check out beta vs. lambda
-  beta.vs.lambda <- ggplot(data=viz.data1,aes(x=lambda,y=value,colour=variable,shape=variable)) + geom_hline(yintercept=beta,alpha=0.25,lty=2) + geom_line() + labs(x=expression(lambda), y=expression(beta)) # + geom_point() 
-  
-  
-  ### check out DF vs. lambda:
-  df.vs.lambda <- switch(regularization,
-                         ridge={
-                           ggplot(data=coef.df) + geom_line(aes(x=lambda,y=df))
-                         },
-                         lasso={
-                           ggplot(data=coef.df) + geom_step(aes(x=lambda,y=df)) + geom_hline(yintercept=0,lty=2,alpha=0.5)
-                         },
-                         elasticnet={
-                           ggplot(data=coef.df) + geom_step(aes(x=lambda,y=df)) + geom_hline(yintercept=0,lty=2,alpha=0.5)
-                         }
-  )
-  df.vs.lambda <- df.vs.lambda + labs(x=expression(lambda),y="Effective Degrees of Freedom")
-  
-  ### look at beta vs. df
-  beta.vs.df <- ggplot(data=viz.data1,aes(y=value,x=df,colour=variable,shape=variable)) + geom_line() + labs(x="Effective Degrees of Freedom", y=expression(beta))
-  
-  ### check out MSE's
-  learning.set.MSE <- .calculateMSE(glmnet.object, new.data=learning.set[,1:J], true.values=learning.set[,J+1])
-  training.set.MSE <- .calculateMSE(glmnet.object, new.data=training.set[,1:J], true.values=training.set[,J+1])
-  
-  ls.MSE.plot <- ggplot(data=data.frame(lambda=lambda, MSE=learning.set.MSE),aes(x=lambda)) + geom_line(aes(y=MSE)) + labs(x=expression(lambda),y="MSE",title=expression(paste("Learning set MSE vs. ",lambda)))
-  
-  ts.MSE.plot <- ggplot(data=data.frame(lambda=lambda, MSE=training.set.MSE),aes(x=lambda)) + geom_line(aes(y=MSE)) + labs(x=expression(lambda),y="MSE",title=expression(paste("Training set MSE vs. ",lambda)))
-  
-  if (display.plots) {
-    show(beta.vs.lambda)
-    show(df.vs.lambda)
-    show(beta.vs.df)
-    show(ls.MSE.plot)
-    show(ts.MSE.plot)
-  } 
-  
-  return(list(p1=beta.vs.lambda,p2=df.vs.lambda,p3=beta.vs.df,p4=ls.MSE.plot,p5=ts.MSE.plot))
-}
